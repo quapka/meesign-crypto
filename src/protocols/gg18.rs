@@ -1,4 +1,4 @@
-use super::meesign::{ProtocolGroupInit, ProtocolInit, ProtocolType};
+use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
 use crate::protocols::{deserialize_vec, inflate, pack, serialize_bcast, serialize_uni, unpack};
 use mpecdsa::{gg18_key_gen::*, gg18_sign::*};

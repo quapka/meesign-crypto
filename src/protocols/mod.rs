@@ -1,11 +1,7 @@
 pub mod elgamal;
 pub mod gg18;
 
-mod meesign {
-    include!(concat!(env!("OUT_DIR"), "/meesign.rs"));
-}
-
-use meesign::{ProtocolMessage, ProtocolType};
+use crate::proto::{ProtocolMessage, ProtocolType};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 

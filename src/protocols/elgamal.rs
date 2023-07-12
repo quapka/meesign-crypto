@@ -1,4 +1,4 @@
-use super::meesign::{ProtocolGroupInit, ProtocolInit, ProtocolType};
+use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
 use crate::protocols::{deserialize_vec, inflate, pack, serialize_bcast, serialize_uni, unpack};
 use curve25519_dalek::{
@@ -231,7 +231,7 @@ impl DecryptContext {
         );
         self.result = Some(msg.clone());
 
-        let ser = inflate(msg.clone(), self.indices.len() - 1);
+        let ser = inflate(msg, self.indices.len() - 1);
 
         Ok((self, pack(ser, ProtocolType::Elgamal)))
     }
@@ -297,8 +297,8 @@ pub fn encrypt(msg: &[u8], pk: &[u8]) -> Result<Vec<u8>> {
 mod tests {
     use prost::bytes::Bytes;
 
-    use super::super::meesign::ProtocolMessage;
     use super::*;
+    use crate::proto::ProtocolMessage;
 
     #[test]
     fn test_encode() {
@@ -468,7 +468,7 @@ mod tests {
                     protocol_type: ProtocolType::Elgamal as i32,
                     index: 1,
                     indices: vec![0, 1],
-                    data: ct.clone(),
+                    data: ct,
                 })
                 .encode_to_vec(),
             )
