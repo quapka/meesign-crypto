@@ -7,12 +7,14 @@ use std::os::raw::c_char;
 use crate::auth;
 use crate::protocol;
 use crate::protocols::elgamal;
+use crate::protocols::frost;
 use crate::protocols::gg18;
 
 #[repr(C)]
 pub enum ProtocolId {
     Gg18,
     Elgamal,
+    Frost,
 }
 
 #[repr(C)]
@@ -83,6 +85,7 @@ pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId) -> ProtocolResult
     let ctx: Box<dyn protocol::Protocol> = match proto_id {
         ProtocolId::Gg18 => Box::new(gg18::KeygenContext::new()),
         ProtocolId::Elgamal => Box::new(elgamal::KeygenContext::new()),
+        ProtocolId::Frost => Box::new(frost::KeygenContext::new()),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
     ProtocolResult::new(ctx_ser, vec![])
@@ -149,6 +152,7 @@ pub unsafe extern "C" fn protocol_init(
     let ctx: Box<dyn protocol::Protocol> = match proto_id {
         ProtocolId::Gg18 => Box::new(gg18::SignContext::new(group_ser)),
         ProtocolId::Elgamal => Box::new(elgamal::DecryptContext::new(group_ser)),
+        ProtocolId::Frost => Box::new(frost::SignContext::new(group_ser)),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
 

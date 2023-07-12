@@ -1,4 +1,5 @@
 pub mod elgamal;
+pub mod frost;
 pub mod gg18;
 
 use crate::proto::{ProtocolMessage, ProtocolType};
