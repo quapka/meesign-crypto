@@ -17,7 +17,12 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub enum KeygenContext {
+pub struct KeygenContext {
+    round: KeygenRound,
+}
+
+#[derive(Serialize, Deserialize)]
+enum KeygenRound {
     R0,
     R1(ParticipantCollectingCommitments<Ristretto>, u16),
     R2(ParticipantCollectingPolynomials<Ristretto>, u16),
@@ -27,10 +32,12 @@ pub enum KeygenContext {
 
 impl KeygenContext {
     pub fn new() -> Self {
-        Self::R0
+        Self {
+            round: KeygenRound::R0,
+        }
     }
 
-    fn init(self, data: &[u8]) -> Result<(Self, Vec<u8>)> {
+    fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolGroupInit::decode(data)?;
 
         if msg.protocol_type != ProtocolType::Elgamal as i32 {
@@ -46,20 +53,21 @@ impl KeygenContext {
             ParticipantCollectingCommitments::<Ristretto>::new(params, index.into(), &mut OsRng);
         let c = dkg.commitment();
         let ser = serialize_bcast(&c, msg.parties as usize - 1)?;
-
-        Ok((Self::R1(dkg, index), pack(ser, ProtocolType::Elgamal)))
+        self.round = KeygenRound::R1(dkg, index);
+        Ok(pack(ser, ProtocolType::Elgamal))
     }
 
-    fn update(self, data: &[u8]) -> Result<(Self, Vec<u8>)> {
+    fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msgs = unpack(data)?;
         let n = msgs.len();
 
-        let (c, ser) = match self {
-            Self::R0 => return Err("protocol not initialized".into()),
-            Self::R1(mut dkg, idx) => {
+        let (c, ser) = match &self.round {
+            KeygenRound::R0 => return Err("protocol not initialized".into()),
+            KeygenRound::R1(dkg, idx) => {
+                let mut dkg = dkg.clone();
                 let data = deserialize_vec(&msgs)?;
                 for (mut i, msg) in data.into_iter().enumerate() {
-                    if i >= idx as usize {
+                    if i >= *idx as usize {
                         i += 1;
                     }
                     dkg.insert_commitment(i, msg);
@@ -71,12 +79,13 @@ impl KeygenContext {
                 let public_info = dkg.public_info();
                 let ser = serialize_bcast(&public_info, n)?;
 
-                (Self::R2(dkg, idx), ser)
+                (KeygenRound::R2(dkg, *idx), ser)
             }
-            Self::R2(mut dkg, idx) => {
+            KeygenRound::R2(dkg, idx) => {
+                let mut dkg = dkg.clone();
                 let data = deserialize_vec(&msgs)?;
                 for (mut i, msg) in data.into_iter().enumerate() {
-                    if i >= idx as usize {
+                    if i >= *idx as usize {
                         i += 1;
                     }
                     dkg.insert_public_polynomial(i, msg)?
@@ -88,7 +97,7 @@ impl KeygenContext {
 
                 let mut shares = Vec::new();
                 for mut i in 0..n {
-                    if i >= idx as usize {
+                    if i >= *idx as usize {
                         i += 1;
                     }
                     let secret_share = dkg.secret_share_for_participant(i);
@@ -96,12 +105,13 @@ impl KeygenContext {
                 }
                 let ser = serialize_uni(shares)?;
 
-                (Self::R3(dkg, idx), ser)
+                (KeygenRound::R3(dkg, *idx), ser)
             }
-            Self::R3(mut dkg, idx) => {
+            KeygenRound::R3(dkg, idx) => {
+                let mut dkg = dkg.clone();
                 let data = deserialize_vec(&msgs)?;
                 for (mut i, msg) in data.into_iter().enumerate() {
-                    if i >= idx as usize {
+                    if i >= *idx as usize {
                         i += 1;
                     }
                     dkg.insert_secret_share(i, msg)?;
@@ -112,28 +122,29 @@ impl KeygenContext {
                 let dkg = dkg.complete()?;
                 let ser = inflate(dkg.key_set().shared_key().as_bytes().to_vec(), n);
 
-                (Self::Done(dkg), ser)
+                (KeygenRound::Done(dkg), ser)
             }
-            Self::Done(_) => return Err("protocol already finished".into()),
+            KeygenRound::Done(_) => return Err("protocol already finished".into()),
         };
 
-        Ok((c, pack(ser, ProtocolType::Elgamal)))
+        self.round = c;
+        Ok(pack(ser, ProtocolType::Elgamal))
     }
 }
 
 #[typetag::serde(name = "elgamal_keygen")]
 impl Protocol for KeygenContext {
-    fn advance(self: Box<Self>, data: &[u8]) -> Result<(Box<dyn Protocol>, Vec<u8>)> {
-        let (ctx, data) = match *self {
-            Self::R0 => self.init(data),
+    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        let data = match self.round {
+            KeygenRound::R0 => self.init(data),
             _ => self.update(data),
         }?;
-        Ok((Box::new(ctx), data))
+        Ok(data)
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
-        match *self {
-            Self::Done(ctx) => Ok(serde_json::to_vec(&ctx)?),
+        match self.round {
+            KeygenRound::Done(ctx) => Ok(serde_json::to_vec(&ctx)?),
             _ => Err("protocol not finished".into()),
         }
     }
@@ -159,7 +170,7 @@ impl DecryptContext {
         }
     }
 
-    fn init(mut self, data: &[u8]) -> Result<(Self, Vec<u8>)> {
+    fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
 
         if msg.protocol_type != ProtocolType::Elgamal as i32 {
@@ -180,10 +191,10 @@ impl DecryptContext {
         let share = (self.ctx.index(), share);
         self.shares.push(share);
 
-        Ok((self, pack(ser, ProtocolType::Elgamal)))
+        Ok(pack(ser, ProtocolType::Elgamal))
     }
 
-    fn update(mut self, data: &[u8]) -> Result<(Self, Vec<u8>)> {
+    fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         if self.shares.is_empty() {
             return Err("protocol not initialized".into());
         }
@@ -232,20 +243,19 @@ impl DecryptContext {
         self.result = Some(msg.clone());
 
         let ser = inflate(msg, self.indices.len() - 1);
-
-        Ok((self, pack(ser, ProtocolType::Elgamal)))
+        Ok(pack(ser, ProtocolType::Elgamal))
     }
 }
 
 #[typetag::serde(name = "elgamal_decrypt")]
 impl Protocol for DecryptContext {
-    fn advance(self: Box<Self>, data: &[u8]) -> Result<(Box<dyn Protocol>, Vec<u8>)> {
-        let (ctx, data) = if self.shares.is_empty() {
+    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        let data = if self.shares.is_empty() {
             self.init(data)
         } else {
             self.update(data)
         }?;
-        Ok((Box::new(ctx), data))
+        Ok(data)
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
@@ -317,10 +327,10 @@ mod tests {
         let protocol_type = ProtocolType::Elgamal as i32;
         let threshold = 2;
         let parties = 2;
-        let p1 = KeygenContext::new();
-        let p2 = KeygenContext::new();
+        let mut p1 = KeygenContext::new();
+        let mut p2 = KeygenContext::new();
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .init(
                 &(ProtocolGroupInit {
                     protocol_type,
@@ -331,7 +341,7 @@ mod tests {
                 .encode_to_vec(),
             )
             .unwrap();
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .init(
                 &(ProtocolGroupInit {
                     protocol_type,
@@ -350,7 +360,7 @@ mod tests {
             .unwrap()
             .message;
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -360,7 +370,7 @@ mod tests {
             )
             .unwrap();
 
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -377,7 +387,7 @@ mod tests {
             .unwrap()
             .message;
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -387,7 +397,7 @@ mod tests {
             )
             .unwrap();
 
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -404,7 +414,7 @@ mod tests {
             .unwrap()
             .message;
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -414,7 +424,7 @@ mod tests {
             )
             .unwrap();
 
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .update(
                 &(ProtocolMessage {
                     protocol_type,
@@ -448,10 +458,10 @@ mod tests {
         let msg = b"hello";
         let ct = encrypt(msg, &pk).unwrap();
 
-        let p1 = DecryptContext::new(&p1);
-        let p2 = DecryptContext::new(&p2);
+        let mut p1 = DecryptContext::new(&p1);
+        let mut p2 = DecryptContext::new(&p2);
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .init(
                 &(ProtocolInit {
                     protocol_type: ProtocolType::Elgamal as i32,
@@ -462,7 +472,7 @@ mod tests {
                 .encode_to_vec(),
             )
             .unwrap();
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .init(
                 &(ProtocolInit {
                     protocol_type: ProtocolType::Elgamal as i32,
@@ -481,7 +491,7 @@ mod tests {
             .unwrap()
             .message;
 
-        let (p1, p1_data) = p1
+        let p1_data = p1
             .update(
                 &(ProtocolMessage {
                     protocol_type: ProtocolType::Elgamal as i32,
@@ -491,7 +501,7 @@ mod tests {
             )
             .unwrap();
 
-        let (p2, p2_data) = p2
+        let p2_data = p2
             .update(
                 &(ProtocolMessage {
                     protocol_type: ProtocolType::Elgamal as i32,
