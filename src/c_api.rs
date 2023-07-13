@@ -6,6 +6,7 @@ use std::os::raw::c_char;
 
 use crate::auth;
 use crate::protocol;
+use crate::protocol::KeygenProtocol;
 use crate::protocols::elgamal;
 use crate::protocols::frost;
 use crate::protocols::gg18;

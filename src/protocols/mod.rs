@@ -42,3 +42,97 @@ fn pack(msgs: Vec<Vec<u8>>, protocol_type: ProtocolType) -> Vec<u8> {
     }
     .encode_to_vec()
 }
+
+#[cfg(test)]
+mod tests {
+    use prost::bytes::Bytes;
+
+    use crate::{proto::ProtocolGroupInit, protocol::KeygenProtocol, protocol::Protocol};
+
+    use super::*;
+
+    pub trait ProtocolTest {
+        // Cannot be added in Protocol (yet) due to typetag Trait limitations
+        const PROTOCOL_TYPE: ProtocolType;
+        const KEYGEN_ROUNDS: usize;
+
+        type KeygenProtocol: KeygenProtocol;
+
+        fn keygen(threshold: u32, parties: u32) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+            assert!(threshold <= parties);
+
+            // initialize
+            let mut ctxs: Vec<Self::KeygenProtocol> =
+                (0..parties).map(|_| Self::KeygenProtocol::new()).collect();
+            let mut messages: Vec<_> = ctxs
+                .iter_mut()
+                .enumerate()
+                .map(|(idx, ctx)| {
+                    ProtocolMessage::decode::<Bytes>(
+                        ctx.advance(
+                            &(ProtocolGroupInit {
+                                protocol_type: Self::PROTOCOL_TYPE as i32,
+                                index: idx as u32 + 1,
+                                parties,
+                                threshold,
+                            })
+                            .encode_to_vec(),
+                        )
+                        .unwrap()
+                        .into(),
+                    )
+                    .unwrap()
+                    .message
+                })
+                .collect();
+
+            // protocol rounds
+            for _ in 0..(Self::KEYGEN_ROUNDS - 1) {
+                messages = ctxs
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(idx, ctx)| {
+                        let relay = messages
+                            .iter()
+                            .enumerate()
+                            .map(|(sender, msg)| {
+                                if sender < idx {
+                                    Some(msg[idx - 1].clone())
+                                } else if sender > idx {
+                                    Some(msg[idx].clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .filter(Option::is_some)
+                            .map(Option::unwrap)
+                            .collect();
+
+                        ProtocolMessage::decode::<Bytes>(
+                            ctx.advance(
+                                &(ProtocolMessage {
+                                    protocol_type: ProtocolType::Frost as i32,
+                                    message: relay,
+                                })
+                                .encode_to_vec(),
+                            )
+                            .unwrap()
+                            .into(),
+                        )
+                        .unwrap()
+                        .message
+                    })
+                    .collect();
+            }
+
+            let pks: Vec<_> = messages.iter().map(|x| x[0].clone()).collect();
+
+            let results = ctxs
+                .into_iter()
+                .map(|ctx| Box::new(ctx).finish().unwrap())
+                .collect();
+
+            (pks, results)
+        }
+    }
+}
