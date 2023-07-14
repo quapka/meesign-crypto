@@ -22,12 +22,6 @@ enum KeygenRound {
 }
 
 impl KeygenContext {
-    pub fn new() -> Self {
-        Self {
-            round: KeygenRound::R0,
-        }
-    }
-
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolGroupInit::decode(data)?;
 
@@ -97,6 +91,14 @@ impl Protocol for KeygenContext {
     }
 }
 
+impl KeygenProtocol for KeygenContext {
+    fn new() -> Self {
+        Self {
+            round: KeygenRound::R0,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SignContext {
     round: SignRound,
@@ -118,12 +120,6 @@ enum SignRound {
 }
 
 impl SignContext {
-    pub fn new(group: &[u8]) -> Self {
-        Self {
-            round: SignRound::R0(serde_json::from_slice(group).unwrap()),
-        }
-    }
-
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
 
@@ -215,6 +211,79 @@ impl Protocol for SignContext {
         match self.round {
             SignRound::Done(sig) => Ok(sig),
             _ => Err("protocol not finished".into()),
+        }
+    }
+}
+
+impl ThresholdProtocol for SignContext {
+    fn new(group: &[u8]) -> Self {
+        Self {
+            round: SignRound::R0(serde_json::from_slice(group).unwrap()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+    use sha2::Digest;
+
+    use super::*;
+    use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
+
+    impl KeygenProtocolTest for KeygenContext {
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Gg18;
+        const ROUNDS: usize = 6;
+    }
+
+    impl ThresholdProtocolTest for SignContext {
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Gg18;
+        const ROUNDS: usize = 10;
+    }
+
+    #[test]
+    fn keygen() {
+        for threshold in 2..6 {
+            for parties in threshold..6 {
+                let (pks, _) =
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+
+                for i in 1..parties {
+                    assert_eq!(pks[0], pks[i])
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sign() {
+        for threshold in 2..6 {
+            for parties in threshold..6 {
+                let (pks, ctxs) =
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+                let msg = b"hello";
+                let dgst = sha2::Sha256::digest(msg);
+
+                let pk = VerifyingKey::from_sec1_bytes(&pks[0]).unwrap();
+
+                // This protocol interface seems to be using indices unrelated to shares but index provided in ProtocolInit message is related to share
+                // TODO try to change it or change the generic test implementation
+                let indices = (0..threshold as u16).collect();
+                let results =
+                    <SignContext as ThresholdProtocolTest>::run(ctxs, indices, dgst.to_vec());
+
+                let signature = results[0].clone();
+
+                for result in results {
+                    assert_eq!(&signature, &result);
+                }
+
+                let mut buffer = [0u8; 64];
+                buffer.copy_from_slice(&signature);
+                let signature = Signature::from_bytes(&buffer.into()).unwrap();
+
+                assert!(pk.verify(msg, &signature).is_ok());
+            }
         }
     }
 }

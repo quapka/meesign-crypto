@@ -30,12 +30,6 @@ enum KeygenRound {
 }
 
 impl KeygenContext {
-    pub fn new() -> Self {
-        Self {
-            round: KeygenRound::R0,
-        }
-    }
-
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolGroupInit::decode(data)?;
 
@@ -149,6 +143,14 @@ impl Protocol for KeygenContext {
     }
 }
 
+impl KeygenProtocol for KeygenContext {
+    fn new() -> Self {
+        Self {
+            round: KeygenRound::R0,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct DecryptContext {
     ctx: ActiveParticipant<Ristretto>,
@@ -159,16 +161,6 @@ pub struct DecryptContext {
 }
 
 impl DecryptContext {
-    pub fn new(group: &[u8]) -> Self {
-        Self {
-            ctx: serde_json::from_slice(group).expect("could not deserialize group context"),
-            ciphertext: Ciphertext::zero(),
-            indices: Vec::new(),
-            shares: Vec::new(),
-            result: None,
-        }
-    }
-
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
 
@@ -265,6 +257,18 @@ impl Protocol for DecryptContext {
     }
 }
 
+impl ThresholdProtocol for DecryptContext {
+    fn new(group: &[u8]) -> Self {
+        Self {
+            ctx: serde_json::from_slice(group).expect("could not deserialize group context"),
+            ciphertext: Ciphertext::zero(),
+            indices: Vec::new(),
+            shares: Vec::new(),
+            result: None,
+        }
+    }
+}
+
 pub fn try_encode(message: &[u8]) -> Option<RistrettoPoint> {
     if message.len() > 30 {
         return None;
@@ -304,10 +308,19 @@ pub fn encrypt(msg: &[u8], pk: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use prost::bytes::Bytes;
-
     use super::*;
-    use crate::proto::ProtocolMessage;
+    use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
+    use rand::seq::IteratorRandom;
+
+    impl KeygenProtocolTest for KeygenContext {
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Elgamal;
+        const ROUNDS: usize = 4;
+    }
+
+    impl ThresholdProtocolTest for DecryptContext {
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Elgamal;
+        const ROUNDS: usize = 2;
+    }
 
     #[test]
     fn test_encode() {
@@ -318,208 +331,37 @@ mod tests {
     }
 
     #[test]
-    fn test_keygen() {
-        keygen();
-    }
+    fn keygen() {
+        for threshold in 2..6 {
+            for parties in threshold..6 {
+                let (pks, _) =
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
 
-    fn keygen() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-        let protocol_type = ProtocolType::Elgamal as i32;
-        let threshold = 2;
-        let parties = 2;
-        let mut p1 = KeygenContext::new();
-        let mut p2 = KeygenContext::new();
-
-        let p1_data = p1
-            .init(
-                &(ProtocolGroupInit {
-                    protocol_type,
-                    index: 0,
-                    parties,
-                    threshold,
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-        let p2_data = p2
-            .init(
-                &(ProtocolGroupInit {
-                    protocol_type,
-                    index: 1,
-                    parties,
-                    threshold,
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        assert_eq!(p1_msg, p2_msg);
-
-        let public_key = p1_msg[0].clone();
-
-        (
-            Box::new(p1).finish().unwrap(),
-            Box::new(p2).finish().unwrap(),
-            public_key,
-        )
+                for i in 1..parties {
+                    assert_eq!(pks[0], pks[i])
+                }
+            }
+        }
     }
 
     #[test]
-    fn test_decrypt() {
-        let (p1, p2, pk) = keygen();
-        let msg = b"hello";
-        let ct = encrypt(msg, &pk).unwrap();
+    fn decrypt() {
+        for threshold in 2..6 {
+            for parties in threshold..6 {
+                let (pks, ctxs) =
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+                let msg = b"hello";
+                let ct = encrypt(msg, &pks[0]).unwrap();
 
-        let mut p1 = DecryptContext::new(&p1);
-        let mut p2 = DecryptContext::new(&p2);
+                let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
+                indices.sort();
+                let results =
+                    <DecryptContext as ThresholdProtocolTest>::run(ctxs, indices, ct.to_vec());
 
-        let p1_data = p1
-            .init(
-                &(ProtocolInit {
-                    protocol_type: ProtocolType::Elgamal as i32,
-                    index: 0,
-                    indices: vec![0, 1],
-                    data: ct.clone(),
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-        let p2_data = p2
-            .init(
-                &(ProtocolInit {
-                    protocol_type: ProtocolType::Elgamal as i32,
-                    index: 1,
-                    indices: vec![0, 1],
-                    data: ct,
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Elgamal as i32,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Elgamal as i32,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        assert_eq!(p1_msg, p2_msg);
-        assert_eq!(msg, p1_msg[0].as_slice());
-        assert_eq!(msg, Box::new(p1).finish().unwrap().as_slice());
-        assert_eq!(msg, Box::new(p2).finish().unwrap().as_slice());
+                for result in results {
+                    assert_eq!(&msg.to_vec(), &result);
+                }
+            }
+        }
     }
 }

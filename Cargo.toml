@@ -23,3 +23,7 @@ frost-secp256k1 = { git  = "https://github.com/dufkan/frost.git", branch = "seri
 [build-dependencies]
 cbindgen = "0.20.0"
 prost-build = "0.11"
+
+[dev-dependencies]
+p256 = { version="0.13.2", features = ["ecdsa"] }
+sha2 = "0.10.7"
