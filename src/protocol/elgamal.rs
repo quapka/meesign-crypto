@@ -1,6 +1,5 @@
 use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
-use crate::protocols::{deserialize_vec, inflate, pack, serialize_bcast, serialize_uni, unpack};
 use curve25519_dalek::{
     ristretto::{CompressedRistretto, RistrettoPoint},
     scalar::Scalar,

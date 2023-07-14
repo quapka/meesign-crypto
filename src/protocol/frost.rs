@@ -1,6 +1,5 @@
 use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
-use crate::protocols::{deserialize_vec, inflate, pack, serialize_bcast, serialize_uni, unpack};
 
 use frost::keys::dkg::{self, round1, round2};
 use frost::keys::{KeyPackage, PublicKeyPackage};
@@ -113,7 +112,6 @@ impl Protocol for KeygenContext {
     }
 }
 
-#[typetag::serde(name = "frost_keygen")]
 impl KeygenProtocol for KeygenContext {
     fn new() -> Self {
         Self {
@@ -140,18 +138,6 @@ enum SignRound {
 }
 
 impl SignContext {
-    pub fn new(group: &[u8]) -> Self {
-        let (key, pubkey): (KeyPackage, PublicKeyPackage) =
-            serde_json::from_slice(group).expect("could not deserialize group context");
-        Self {
-            key,
-            pubkey,
-            message: None,
-            indices: None,
-            round: SignRound::R0,
-        }
-    }
-
     fn local_index(&self) -> Result<usize> {
         let identifier = self.key.identifier();
         self.indices
@@ -260,17 +246,36 @@ impl Protocol for SignContext {
     }
 }
 
+impl ThresholdProtocol for SignContext {
+    fn new(group: &[u8]) -> Self {
+        let (key, pubkey): (KeyPackage, PublicKeyPackage) =
+            serde_json::from_slice(group).expect("could not deserialize group context");
+        Self {
+            key,
+            pubkey,
+            message: None,
+            indices: None,
+            round: SignRound::R0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use prost::bytes::Bytes;
-
     use super::*;
-    use crate::{proto::ProtocolMessage, protocols::tests::ProtocolTest};
+    use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
+    use rand::seq::IteratorRandom;
 
-    impl ProtocolTest for KeygenContext {
+    impl KeygenProtocolTest for KeygenContext {
         const PROTOCOL_TYPE: ProtocolType = ProtocolType::Frost;
-        const KEYGEN_ROUNDS: usize = 3;
-        type KeygenProtocol = KeygenContext;
+        const ROUNDS: usize = 3;
+        const INDEX_OFFSET: u32 = 1;
+    }
+
+    impl ThresholdProtocolTest for SignContext {
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Frost;
+        const ROUNDS: usize = 3;
+        const INDEX_OFFSET: u32 = 1;
     }
 
     #[test]
@@ -279,7 +284,7 @@ mod tests {
             for parties in threshold..5 {
                 // let (pks, _) = keygen(threshold as u32, parties as u32);
                 let (pks, _) =
-                    <KeygenContext as ProtocolTest>::keygen(threshold as u32, parties as u32);
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
 
                 let pks: Vec<PublicKeyPackage> = pks
                     .iter()
@@ -296,108 +301,27 @@ mod tests {
     }
 
     #[test]
-    fn test_sign() {
-        let (pks, ctxs) = <KeygenContext as ProtocolTest>::keygen(2, 2);
-        let message = b"hello";
-        let pk: PublicKeyPackage = serde_json::from_slice(&pks[0]).unwrap();
+    fn sign() {
+        for threshold in 2..5 {
+            for parties in threshold..5 {
+                let (pks, ctxs) =
+                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+                let message = b"hello";
+                let pk: PublicKeyPackage = serde_json::from_slice(&pks[0]).unwrap();
 
-        let mut p1 = SignContext::new(&ctxs[0]);
-        let mut p2 = SignContext::new(&ctxs[1]);
+                let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
+                indices.sort();
+                let results =
+                    <SignContext as ThresholdProtocolTest>::run(ctxs, indices, message.to_vec());
 
-        let p1_data = p1
-            .init(
-                &(ProtocolInit {
-                    protocol_type: ProtocolType::Frost as i32,
-                    index: 1,
-                    indices: vec![1, 2],
-                    data: message.to_vec(),
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-        let p2_data = p2
-            .init(
-                &(ProtocolInit {
-                    protocol_type: ProtocolType::Frost as i32,
-                    index: 2,
-                    indices: vec![1, 2],
-                    data: message.to_vec(),
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
+                let signature: Signature = serde_json::from_slice(&results[0]).unwrap();
 
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
+                for result in results {
+                    assert_eq!(signature, serde_json::from_slice(&result).unwrap());
+                }
 
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Frost as i32,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Frost as i32,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let p1_data = p1
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Frost as i32,
-                    message: vec![p2_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-        let p2_data = p2
-            .update(
-                &(ProtocolMessage {
-                    protocol_type: ProtocolType::Frost as i32,
-                    message: vec![p1_msg[0].clone()],
-                })
-                .encode_to_vec(),
-            )
-            .unwrap();
-
-        let p1_msg = ProtocolMessage::decode(Bytes::from(p1_data))
-            .unwrap()
-            .message;
-        let p2_msg = ProtocolMessage::decode(Bytes::from(p2_data))
-            .unwrap()
-            .message;
-
-        let signature: Signature = serde_json::from_slice(&p1_msg[0]).unwrap();
-
-        assert_eq!(signature, serde_json::from_slice(&p2_msg[0]).unwrap());
-        assert_eq!(
-            signature,
-            serde_json::from_slice(&Box::new(p1).finish().unwrap()).unwrap()
-        );
-        assert_eq!(
-            signature,
-            serde_json::from_slice(&Box::new(p2).finish().unwrap()).unwrap()
-        );
-
-        assert!(pk.group_public().verify(message, &signature).is_ok());
+                assert!(pk.group_public().verify(message, &signature).is_ok());
+            }
+        }
     }
 }
