@@ -123,16 +123,16 @@ impl SignContext {
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
 
-        // FIXME: proto fields should have matching types, i.e. i16, not i32
-        let indices: Vec<u16> = msg.indices.into_iter().map(|i| i as u16).collect();
+        let indices: Vec<u16> = msg.indices.clone().into_iter().map(|i| i as u16).collect();
         let parties = indices.len();
+        let local_index = indices.iter().position(|&i| i == msg.index as u16).unwrap();
 
         let c0 = match &self.round {
             SignRound::R0(c0) => c0.clone(),
             _ => unreachable!(),
         };
 
-        let (out, c1) = gg18_sign1(c0, indices, msg.index as usize, msg.data)?;
+        let (out, c1) = gg18_sign1(c0, indices, local_index, msg.data)?;
         let ser = serialize_bcast(&out, parties - 1)?;
         self.round = SignRound::R1(c1);
         Ok(pack(ser, ProtocolType::Gg18))
@@ -226,6 +226,7 @@ impl ThresholdProtocol for SignContext {
 #[cfg(test)]
 mod tests {
     use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+    use rand::{rngs::OsRng, seq::IteratorRandom};
     use sha2::Digest;
 
     use super::*;
@@ -266,9 +267,8 @@ mod tests {
 
                 let pk = VerifyingKey::from_sec1_bytes(&pks[0]).unwrap();
 
-                // This protocol interface seems to be using indices unrelated to shares but index provided in ProtocolInit message is related to share
-                // TODO try to change it or change the generic test implementation
-                let indices = (0..threshold as u16).collect();
+                let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
+                indices.sort();
                 let results =
                     <SignContext as ThresholdProtocolTest>::run(ctxs, indices, dgst.to_vec());
 
