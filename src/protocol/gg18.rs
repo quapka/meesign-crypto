@@ -6,7 +6,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct KeygenContext {
+pub(crate) struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -100,7 +100,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SignContext {
+pub(crate) struct SignContext {
     round: SignRound,
 }
 

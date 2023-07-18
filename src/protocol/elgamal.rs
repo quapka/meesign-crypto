@@ -16,7 +16,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct KeygenContext {
+pub(crate) struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -152,7 +152,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct DecryptContext {
+pub(crate) struct DecryptContext {
     ctx: ActiveParticipant<Ristretto>,
     ciphertext: Ciphertext<Ristretto>,
     indices: Vec<u16>,
@@ -269,7 +269,7 @@ impl ThresholdProtocol for DecryptContext {
     }
 }
 
-pub fn try_encode(message: &[u8]) -> Option<RistrettoPoint> {
+fn try_encode(message: &[u8]) -> Option<RistrettoPoint> {
     if message.len() > 30 {
         return None;
     }
@@ -292,7 +292,7 @@ pub fn try_encode(message: &[u8]) -> Option<RistrettoPoint> {
     None
 }
 
-pub fn decode(p: RistrettoPoint) -> Vec<u8> {
+fn decode(p: RistrettoPoint) -> Vec<u8> {
     let scalar = Scalar::from_bytes_mod_order(p.compress().to_bytes()).reduce();
     let scalar_bytes = &scalar.as_bytes()[1..];
     scalar_bytes[1..(scalar_bytes[0] as usize + 1)].to_vec()
