@@ -81,7 +81,7 @@ impl KeygenContext {
                     .collect();
                 let (key, pubkey) = frost::keys::dkg::part3(secret, round1, &round2)?;
 
-                let msgs = inflate(serde_json::to_vec(&pubkey)?, round2.len());
+                let msgs = inflate(serde_json::to_vec(&pubkey.group_public())?, round2.len());
                 (KeygenRound::Done(key, pubkey), msgs)
             }
             KeygenRound::Done(_, _) => return Err("protocol already finished".into()),
@@ -264,6 +264,7 @@ impl ThresholdProtocol for SignContext {
 mod tests {
     use super::*;
     use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
+    use frost::VerifyingKey;
     use rand::seq::IteratorRandom;
 
     impl KeygenProtocolTest for KeygenContext {
@@ -285,7 +286,7 @@ mod tests {
                 let (pks, _) =
                     <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
 
-                let pks: Vec<PublicKeyPackage> = pks
+                let pks: Vec<VerifyingKey> = pks
                     .iter()
                     .map(|x| serde_json::from_slice(&x).unwrap())
                     .collect();
@@ -293,8 +294,6 @@ mod tests {
                 for i in 1..parties {
                     assert_eq!(pks[0], pks[i])
                 }
-
-                assert_eq!(pks[0].signer_pubkeys().len(), parties);
             }
         }
     }
@@ -306,7 +305,7 @@ mod tests {
                 let (pks, ctxs) =
                     <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
                 let msg = b"hello";
-                let pk: PublicKeyPackage = serde_json::from_slice(&pks[0]).unwrap();
+                let pk: VerifyingKey = serde_json::from_slice(&pks[0]).unwrap();
 
                 let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
                 indices.sort();
@@ -319,7 +318,7 @@ mod tests {
                     assert_eq!(signature, serde_json::from_slice(&result).unwrap());
                 }
 
-                assert!(pk.group_public().verify(msg, &signature).is_ok());
+                assert!(pk.verify(msg, &signature).is_ok());
             }
         }
     }
