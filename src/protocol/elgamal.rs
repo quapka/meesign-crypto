@@ -12,6 +12,10 @@ use elastic_elgamal::{
 };
 use rand::rngs::OsRng;
 
+use aes_gcm::{
+    aead::{Aead, AeadCore, KeyInit, Payload},
+    Aes128Gcm,
+};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 
@@ -154,7 +158,8 @@ impl KeygenProtocol for KeygenContext {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct DecryptContext {
     ctx: ActiveParticipant<Ristretto>,
-    ciphertext: Ciphertext<Ristretto>,
+    encrypted_key: Ciphertext<Ristretto>,
+    data: (Vec<u8>, Vec<u8>, Vec<u8>),
     indices: Vec<u16>,
     shares: Vec<(usize, VerifiableDecryption<Ristretto>)>,
     result: Option<Vec<u8>>,
@@ -168,11 +173,11 @@ impl DecryptContext {
             return Err("wrong protocol type".into());
         }
 
-        // FIXME: proto fields should have matching types, i.e. i16, not i32
         self.indices = msg.indices.clone().into_iter().map(|i| i as u16).collect();
-        self.ciphertext = serde_json::from_slice(&msg.data)?;
+        self.data = serde_json::from_slice(&msg.data)?;
+        self.encrypted_key = serde_json::from_slice(&self.data.0)?;
 
-        let (share, proof) = self.ctx.decrypt_share(self.ciphertext, &mut OsRng);
+        let (share, proof) = self.ctx.decrypt_share(self.encrypted_key, &mut OsRng);
 
         let ser = serialize_bcast(
             &serde_json::to_string(&(share, proof))?.as_bytes(),
@@ -213,7 +218,7 @@ impl DecryptContext {
                 .key_set()
                 .verify_share(
                     msg.0.into(),
-                    self.ciphertext,
+                    self.encrypted_key,
                     self.indices[i].into(),
                     &msg.1,
                 )
@@ -221,8 +226,9 @@ impl DecryptContext {
             self.shares.push((self.indices[i].into(), msg.0));
         }
 
-        let msg = decode(
-            self.ciphertext.blinded_element()
+        let mut key = [0u8; 16];
+        key.copy_from_slice(&decode(
+            self.encrypted_key.blinded_element()
                 - self
                     .ctx
                     .key_set()
@@ -230,7 +236,22 @@ impl DecryptContext {
                     .combine_shares(self.shares.clone())
                     .unwrap()
                     .as_element(),
-        );
+        ));
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&self.data.1);
+
+        let cipher = Aes128Gcm::new(&key.into());
+
+        let msg = cipher
+            .decrypt(
+                &nonce.into(),
+                Payload {
+                    msg: &self.data.2,
+                    aad: &self.data.0,
+                },
+            )
+            .unwrap();
+
         self.result = Some(msg.clone());
 
         let ser = inflate(msg, self.indices.len() - 1);
@@ -261,7 +282,8 @@ impl ThresholdProtocol for DecryptContext {
     fn new(group: &[u8]) -> Self {
         Self {
             ctx: serde_json::from_slice(group).expect("could not deserialize group context"),
-            ciphertext: Ciphertext::zero(),
+            encrypted_key: Ciphertext::zero(),
+            data: (Vec::new(), Vec::new(), Vec::new()),
             indices: Vec::new(),
             shares: Vec::new(),
             result: None,
@@ -300,10 +322,25 @@ fn decode(p: RistrettoPoint) -> Vec<u8> {
 
 pub fn encrypt(msg: &[u8], pk: &[u8]) -> Result<Vec<u8>> {
     let pk: PublicKey<Ristretto> = PublicKey::from_bytes(pk).unwrap();
+    let key = Aes128Gcm::generate_key(&mut OsRng);
 
-    let encoded: <Ristretto as ElementOps>::Element = try_encode(msg).ok_or("encoding failed")?;
-    let ct = pk.encrypt_element(encoded, &mut OsRng);
-    Ok(serde_json::to_vec(&ct)?)
+    let encoded_key: <Ristretto as ElementOps>::Element =
+        try_encode(&key).ok_or("encoding failed")?;
+    let encrypted_key = serde_json::to_vec(&pk.encrypt_element(encoded_key, &mut OsRng))?;
+
+    let cipher = Aes128Gcm::new(&key);
+    let nonce = Aes128Gcm::generate_nonce(&mut OsRng);
+    let ct = cipher
+        .encrypt(
+            &nonce,
+            Payload {
+                msg,
+                aad: &encrypted_key,
+            },
+        )
+        .unwrap();
+
+    Ok(serde_json::to_vec(&(&encrypted_key, &nonce.to_vec(), &ct))?)
 }
 
 #[cfg(test)]
