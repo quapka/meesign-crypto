@@ -8,7 +8,7 @@ use frost::round2::SignatureShare;
 use frost::{Identifier, Signature, SigningPackage};
 use prost::Message;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 
 use frost_secp256k1 as frost;
@@ -23,7 +23,7 @@ pub(crate) struct KeygenContext {
 enum KeygenRound {
     R0,
     R1(round1::SecretPackage),
-    R2(round2::SecretPackage, HashMap<Identifier, round1::Package>),
+    R2(round2::SecretPackage, BTreeMap<Identifier, round1::Package>),
     Done(KeyPackage, PublicKeyPackage),
 }
 
@@ -60,7 +60,7 @@ impl KeygenContext {
             KeygenRound::R0 => return Err("protocol not initialized".into()),
             KeygenRound::R1(secret) => {
                 let data: Vec<round1::Package> = deserialize_vec(&unpack(data)?)?;
-                let round1: HashMap<Identifier, round1::Package> = data
+                let round1: BTreeMap<Identifier, round1::Package> = data
                     .into_iter()
                     .enumerate()
                     .map(|(i, msg)| (Self::index_to_identifier(i, secret.identifier()), msg))
@@ -74,14 +74,14 @@ impl KeygenContext {
             }
             KeygenRound::R2(secret, round1) => {
                 let data: Vec<round2::Package> = deserialize_vec(&unpack(data)?)?;
-                let round2: HashMap<Identifier, round2::Package> = data
+                let round2: BTreeMap<Identifier, round2::Package> = data
                     .into_iter()
                     .enumerate()
                     .map(|(i, msg)| (Self::index_to_identifier(i, secret.identifier()), msg))
                     .collect();
                 let (key, pubkey) = frost::keys::dkg::part3(secret, round1, &round2)?;
 
-                let msgs = inflate(serde_json::to_vec(&pubkey.group_public())?, round2.len());
+                let msgs = inflate(serde_json::to_vec(&pubkey.verifying_key())?, round2.len());
                 (KeygenRound::Done(key, pubkey), msgs)
             }
             KeygenRound::Done(_, _) => return Err("protocol already finished".into()),
@@ -159,7 +159,7 @@ impl SignContext {
         self.indices = Some(msg.indices.iter().map(|i| *i as u16).collect());
         self.message = Some(msg.data);
 
-        let (nonces, commitments) = frost::round1::commit(self.key.secret_share(), &mut OsRng);
+        let (nonces, commitments) = frost::round1::commit(self.key.signing_share(), &mut OsRng);
 
         let msgs = serialize_bcast(&commitments, self.indices.as_ref().unwrap().len() - 1)?;
         self.round = SignRound::R1(nonces, commitments);
@@ -201,7 +201,7 @@ impl SignContext {
                 let local_index = self.local_index()?;
                 let data: Vec<SignatureShare> = deserialize_vec(&unpack(data)?)?;
 
-                let mut shares: HashMap<Identifier, SignatureShare> = data
+                let mut shares: BTreeMap<Identifier, SignatureShare> = data
                     .into_iter()
                     .enumerate()
                     .map(|(i, msg)| {
