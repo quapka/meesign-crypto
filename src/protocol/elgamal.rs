@@ -303,19 +303,19 @@ fn try_encode(message: &[u8]) -> Option<RistrettoPoint> {
 
     let offset = Scalar::from(2u32.pow(8));
     scalar *= offset;
-    let mut d = Scalar::zero();
+    let mut d = Scalar::ZERO;
     while d != offset {
         if let Some(p) = CompressedRistretto((scalar + d).to_bytes()).decompress() {
             return Some(p);
         }
 
-        d += Scalar::one();
+        d += Scalar::ONE;
     }
     None
 }
 
 fn decode(p: RistrettoPoint) -> Vec<u8> {
-    let scalar = Scalar::from_bytes_mod_order(p.compress().to_bytes()).reduce();
+    let scalar = Scalar::from_bytes_mod_order(p.compress().to_bytes());
     let scalar_bytes = &scalar.as_bytes()[1..];
     scalar_bytes[1..(scalar_bytes[0] as usize + 1)].to_vec()
 }
