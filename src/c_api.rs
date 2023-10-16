@@ -5,7 +5,14 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 
 use crate::auth;
-use crate::protocol::{self, elgamal, frost, gg18, KeygenProtocol, ThresholdProtocol};
+#[cfg(feature = "elgamal")]
+use crate::protocol::elgamal;
+#[cfg(feature = "frost")]
+use crate::protocol::frost;
+#[cfg(feature = "gg18")]
+use crate::protocol::gg18;
+#[cfg(feature = "protocol")]
+use crate::protocol::{self, KeygenProtocol, ThresholdProtocol};
 
 #[repr(C)]
 pub enum ProtocolId {
@@ -75,21 +82,29 @@ impl ProtocolResult {
     }
 }
 
+#[cfg(feature = "protocol")]
 #[no_mangle]
 #[allow(unused_variables)]
 pub unsafe extern "C" fn protocol_result_free(res: ProtocolResult) {}
 
+#[cfg(feature = "protocol")]
 #[no_mangle]
 pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId) -> ProtocolResult {
     let ctx: Box<dyn protocol::Protocol> = match proto_id {
+        #[cfg(feature = "gg18")]
         ProtocolId::Gg18 => Box::new(gg18::KeygenContext::new()),
+        #[cfg(feature = "elgamal")]
         ProtocolId::Elgamal => Box::new(elgamal::KeygenContext::new()),
+        #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::KeygenContext::new()),
+        #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        _ => panic!("Protocol not supported"),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
     ProtocolResult::new(ctx_ser, vec![])
 }
 
+#[cfg(feature = "protocol")]
 fn advance(ctx1_ser: &[u8], data_in: &[u8]) -> protocol::Result<(Vec<u8>, Vec<u8>)> {
     let mut ctx1: Box<dyn protocol::Protocol> = serde_json::from_slice(ctx1_ser).unwrap();
     let data_out = ctx1.advance(data_in)?;
@@ -97,6 +112,7 @@ fn advance(ctx1_ser: &[u8], data_in: &[u8]) -> protocol::Result<(Vec<u8>, Vec<u8
     Ok((ctx2_ser, data_out))
 }
 
+#[cfg(feature = "protocol")]
 #[no_mangle]
 pub unsafe extern "C" fn protocol_advance(
     ctx_ptr: *const u8,
@@ -117,12 +133,14 @@ pub unsafe extern "C" fn protocol_advance(
     }
 }
 
+#[cfg(feature = "protocol")]
 fn finish(ctx_ser: &[u8]) -> protocol::Result<(Vec<u8>, Vec<u8>)> {
     let ctx: Box<dyn protocol::Protocol> = serde_json::from_slice(ctx_ser).unwrap();
     let data_out = ctx.finish()?;
     Ok((vec![], data_out))
 }
 
+#[cfg(feature = "protocol")]
 #[no_mangle]
 pub unsafe extern "C" fn protocol_finish(
     ctx_ptr: *const u8,
@@ -140,6 +158,7 @@ pub unsafe extern "C" fn protocol_finish(
     }
 }
 
+#[cfg(feature = "protocol")]
 #[no_mangle]
 pub unsafe extern "C" fn protocol_init(
     proto_id: ProtocolId,
@@ -149,9 +168,14 @@ pub unsafe extern "C" fn protocol_init(
     let group_ser = unsafe { slice::from_raw_parts(group_ptr, group_len) };
 
     let ctx: Box<dyn protocol::Protocol> = match proto_id {
+        #[cfg(feature = "gg18")]
         ProtocolId::Gg18 => Box::new(gg18::SignContext::new(group_ser)),
+        #[cfg(feature = "elgamal")]
         ProtocolId::Elgamal => Box::new(elgamal::DecryptContext::new(group_ser)),
+        #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::SignContext::new(group_ser)),
+        #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        _ => panic!("Protocol not supported"),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
 
@@ -209,6 +233,7 @@ pub unsafe extern "C" fn auth_cert_key_to_pkcs12(
     }
 }
 
+#[cfg(feature = "elgamal")]
 #[no_mangle]
 pub unsafe extern "C" fn encrypt(
     msg_ptr: *const u8,

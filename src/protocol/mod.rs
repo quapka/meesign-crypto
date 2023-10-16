@@ -1,5 +1,8 @@
+#[cfg(feature = "elgamal")]
 pub mod elgamal;
+#[cfg(feature = "frost")]
 pub mod frost;
+#[cfg(feature = "gg18")]
 pub mod gg18;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
