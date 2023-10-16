@@ -54,7 +54,9 @@ fn set_error(error_out: *mut *mut c_char, error: &dyn Error) {
 #[no_mangle]
 pub unsafe extern "C" fn error_free(error: *mut c_char) {
     if !error.is_null() {
-        unsafe { CString::from_raw(error) };
+        unsafe {
+            let _ = CString::from_raw(error);
+        };
     }
 }
 
