@@ -23,7 +23,9 @@
             pkg-config
             fd
             rust-bin.beta.latest.default
-          ];
+          ] ++ (with pkgs; [
+            protobuf
+          ]);
 
           shellHook = ''
             alias find=fd
