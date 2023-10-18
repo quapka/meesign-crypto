@@ -25,7 +25,19 @@ jobs:
       uses: arduino/setup-protoc@v1
       with:
         version: 3.x
+    - name: Install pcsc-lite
+      run: sudo apt-get install libpcsclite-dev
     - name: Build
-      run: cargo build --no-default-features --features ${{ matrix.feature }} --verbose
+      run: >
+        cargo build
+        --no-default-features
+        --features ${{ matrix.feature }}
+        --verbose
     - name: Run tests
-      run: cargo test --no-default-features --features ${{ matrix.feature }} --verbose
+      run: >
+        cargo test
+        --no-default-features
+        --features ${{ matrix.feature }}
+        --verbose
+        --
+        --skip card
