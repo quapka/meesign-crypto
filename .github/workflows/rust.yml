@@ -8,6 +8,10 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: ["gg18", "frost", "elgamal", "default"]
 
     steps:
     - uses: actions/checkout@v3
@@ -22,6 +26,6 @@ jobs:
       with:
         version: 3.x
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --no-default-features --features ${{ matrix.feature }} --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --no-default-features --features ${{ matrix.feature }} --verbose
