@@ -21,15 +21,12 @@
           buildInputs = [
             openssl
             pkg-config
-            fd
             rust-bin.beta.latest.default
+            pcsclite
           ] ++ (with pkgs; [
             protobuf
           ]);
 
-          shellHook = ''
-            alias find=fd
-          '';
         };
       }
     );
