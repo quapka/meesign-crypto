@@ -23,9 +23,8 @@
             pkg-config
             rust-bin.beta.latest.default
             pcsclite
-          ] ++ (with pkgs; [
             protobuf
-          ]);
+          ];
 
         };
       }
