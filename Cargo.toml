@@ -23,6 +23,7 @@ aes-gcm = "0.10.2"
 pretzel = {"path" = "/home/qup/projects/pretzel", optional = true}
 # TODO is it possible to depend on the upstream RSA for meesign-crypto
 rsa = {"path" = "/home/qup/projects/RSA", optional = true}
+num-bigint = { version = "0.8.2", features = [],  package = "num-bigint-dig" }
 
 [build-dependencies]
 cbindgen = "0.20.0"

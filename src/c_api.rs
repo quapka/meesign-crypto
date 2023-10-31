@@ -11,14 +11,21 @@ use crate::protocol::elgamal;
 use crate::protocol::frost;
 #[cfg(feature = "gg18")]
 use crate::protocol::gg18;
+#[cfg(feature = "ptsrsap1")]
+use crate::protocol::ptsrsap1;
 #[cfg(feature = "protocol")]
 use crate::protocol::{self, KeygenProtocol, ThresholdProtocol};
 
 #[repr(C)]
 pub enum ProtocolId {
+    #[cfg(feature = "gg18")]
     Gg18,
+    #[cfg(feature = "elgamal")]
     Elgamal,
+    #[cfg(feature = "frost")]
     Frost,
+    #[cfg(feature = "ptsrsap1")]
+    Ptsrsap1,
 }
 
 #[repr(C)]
@@ -97,6 +104,8 @@ pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId) -> ProtocolResult
         ProtocolId::Elgamal => Box::new(elgamal::KeygenContext::new()),
         #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::KeygenContext::new()),
+        // #[cfg(feature = "ptsrsap1")]
+        // ProtocolId::Ptsrsap1 => Box::new(),
         #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
         _ => panic!("Protocol not supported"),
     };
@@ -174,7 +183,9 @@ pub unsafe extern "C" fn protocol_init(
         ProtocolId::Elgamal => Box::new(elgamal::DecryptContext::new(group_ser)),
         #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::SignContext::new(group_ser)),
-        #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        #[cfg(feature = "ptsrsap1")]
+        // ProtocolId::Ptsrsap1 => Box::new(),
+        // #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
         _ => panic!("Protocol not supported"),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
