@@ -104,9 +104,14 @@ pub unsafe extern "C" fn protocol_keygen(proto_id: ProtocolId) -> ProtocolResult
         ProtocolId::Elgamal => Box::new(elgamal::KeygenContext::new()),
         #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::KeygenContext::new()),
-        // #[cfg(feature = "ptsrsap1")]
-        // ProtocolId::Ptsrsap1 => Box::new(),
-        #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        #[cfg(feature = "ptsrsap1")]
+        ProtocolId::Ptsrsap1 => Box::new(ptsrsap1::KeygenContext::new()),
+        #[cfg(not(all(
+            feature = "gg18",
+            feature = "elgamal",
+            feature = "frost",
+            feature = "ptsrsap1"
+        )))]
         _ => panic!("Protocol not supported"),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
@@ -184,8 +189,13 @@ pub unsafe extern "C" fn protocol_init(
         #[cfg(feature = "frost")]
         ProtocolId::Frost => Box::new(frost::SignContext::new(group_ser)),
         #[cfg(feature = "ptsrsap1")]
-        // ProtocolId::Ptsrsap1 => Box::new(),
-        // #[cfg(not(all(feature = "gg18", feature = "elgamal", feature = "frost")))]
+        ProtocolId::Ptsrsap1 => Box::new(ptsrsap1::SignContext::new(group_ser)),
+        #[cfg(not(all(
+            feature = "gg18",
+            feature = "elgamal",
+            feature = "frost",
+            feature = "ptsrsap1"
+        )))]
         _ => panic!("Protocol not supported"),
     };
     let ctx_ser = serde_json::to_vec(&ctx).unwrap();
