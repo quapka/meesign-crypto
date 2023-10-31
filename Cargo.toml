@@ -20,8 +20,10 @@ rand = "0.8.5"
 curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
 frost-secp256k1 = { git  = "https://github.com/dufkan/frost.git", branch = "serialize-state", features = ["serde"], optional = true }
 aes-gcm = "0.10.2"
+# FIXME publish pretzel and update the path
 pretzel = {"path" = "/home/qup/projects/pretzel", optional = true}
 # TODO is it possible to depend on the upstream RSA for meesign-crypto
+# FIXME publish pretzel and update the path
 rsa = {"path" = "/home/qup/projects/RSA", optional = true}
 num-bigint = { version = "0.8.2", features = [],  package = "num-bigint-dig" }
 

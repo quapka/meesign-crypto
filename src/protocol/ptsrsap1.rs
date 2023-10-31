@@ -193,7 +193,7 @@ impl SignContext {
 
     fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg = ProtocolInit::decode(data)?;
-        if msg.protocol_type != ProtocolType::Frost as i32 {
+        if msg.protocol_type != ProtocolType::Ptsrsap1 as i32 {
             return Err("wrong protocol type".into());
         }
 
@@ -372,7 +372,7 @@ mod tests {
     }
 
     impl ThresholdProtocolTest for SignContext {
-        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Frost;
+        const PROTOCOL_TYPE: ProtocolType = ProtocolType::Ptsrsap1;
         // Minus one because we do not count the R0 round
         // const ROUNDS: usize = mem::variant_count::<SignRound>() - 1;
         const ROUNDS: usize = 2;
