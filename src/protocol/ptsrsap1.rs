@@ -1,18 +1,9 @@
 use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
 use num_bigint::*;
-// use num_traits::identities::Zero;
-
-use rsa::RsaPublicKey;
-
-use serde::{Deserialize, Serialize};
-
-// use pretzel::{
-//     factorial, generate_secret_shares, generate_verification, key_gen, sign_with_share,
-//     verify_proof, PaddingScheme, PartialMessageSignature, PublicPackage, RSAThresholdPrivateKey,
-//     RsaSecretShare, SecretPackage,,
-// };
 use pretzel::*;
+use rsa::RsaPublicKey;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct KeygenContext {
@@ -72,7 +63,6 @@ impl KeygenContext {
                         share: share.clone(),
                     };
                     share_data.push((Some(index), secret_pkg, &public_pkg));
-                    // share_data.push(&public_pkg);
                 }
             }
             msgs = serialize_uni(share_data)?;
@@ -99,7 +89,6 @@ impl KeygenContext {
             // This is the dealer case that already has its values generated.
             KeygenRound::R1(Some(id), Some(secret_pkg), Some(public_pkg)) => {
                 let no_msgs: Vec<u8> = vec![0u8; 32];
-                // assert_eq!(*id, 0u16);
                 (
                     KeygenRound::Done(secret_pkg.clone(), public_pkg.clone()),
                     serialize_uni(no_msgs)?,
@@ -145,7 +134,6 @@ impl Protocol for KeygenContext {
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
         match self.round {
             KeygenRound::Done(secret_pkg, public_pkg) => {
-                eprintln!("finishing protocol");
                 Ok(serde_json::to_vec(&(secret_pkg, public_pkg))?)
             }
             _ => Err("protocol not finished".into()),
@@ -177,7 +165,6 @@ enum SignRound {
     R0,
     // The first is the message, but we shoudln't story it here, maybe just the hash
     R1(String, PartialMessageSignature),
-    // R2(SigningPackage, SignatureShare),
     // TODO this should be changed to Signature and not BigInt
     Done(BigInt),
 }
@@ -198,7 +185,6 @@ impl SignContext {
         }
 
         self.indices = Some(msg.indices.iter().map(|i| *i as u16).collect());
-        eprintln!("indices: {0:?}", self.indices);
         self.message = Some(msg.data);
 
         // FIXME
@@ -209,8 +195,6 @@ impl SignContext {
             None => return Err("cannot sign and empty message".into()),
             Some(msg) => String::from_utf8(msg.to_vec()).unwrap(),
         };
-        eprintln!("init self.key_share.uid: {}", self.key_share.uid);
-        // eprintln!("message len: {}", message.len());
         let pms = sign_with_share(
             message.clone(),
             delta,
@@ -223,10 +207,8 @@ impl SignContext {
 
         // Each party has the self.key_share and therefore can sign with the share. Then it also
         // needs to generate the proof and broadcast all of these.
-        eprintln!("init indices: {:?}", self.indices);
 
         let msgs = serialize_bcast(&pms, self.indices.as_ref().unwrap().len() - 1)?;
-        // self.round = SignRound::R1(nonces, commitments);
         self.round = SignRound::R1(message, pms);
         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
@@ -235,56 +217,25 @@ impl SignContext {
         match &self.round {
             SignRound::R0 => Err("protocol not initialized".into()),
             SignRound::R1(msg, pms) => {
-                eprintln!("R1 signing, I am {}", self.key_share.uid);
                 let mut data: Vec<PartialMessageSignature> = deserialize_vec(&unpack(data)?)?;
-                // TODO: Check that the non-empty partial signatures originate from the indices
-                // from self.indices?
-                // Each party receives all of the signature shares now and:
-                // - verifies the proofs
-                // - combines the signatures and broadcasts it.
                 // Iterate over partialSignatures
                 assert_eq!(Some(msg.as_bytes().to_vec()), self.message);
                 let local_index = self.local_index()?;
-                eprintln!(
-                    "local_index: {}, self.key_share.uid {}",
-                    local_index, self.key_share.uid
-                );
                 let delta = factorial(self.public_pkg.group_size);
                 data.push(pms.clone());
-                eprintln!("group size: {}", self.public_pkg.group_size);
-                eprintln!("the length of the data is: {}", data.len());
-                match data
-                    .clone()
-                    .into_iter()
-                    // .filter(Option::is_some)
-                    .enumerate()
-                    // .map(|(i, msg)| {
-                    //     (
-                    //         self.indices.as_ref().unwrap()
-                    //             [if i >= local_index { i + 1 } else { i }],
-                    //         msg,
-                    //     )
-                    // })
-                    .all(|(ind, i_pms)| {
-                        eprintln!("i_pmd.id {}", i_pms.id);
-                        verify_proof(
-                            msg.to_string(),
-                            self.public_pkg.v.clone(),
-                            // TODO
-                            delta,
-                            // xi: BigInt,
-                            // is the + 1 correct here?
-                            // FIXME the indexing has to match self.indices
-                            &self.public_pkg.verification_keys[i_pms.id - 1],
-                            // c: BigInt,
-                            // z: BigInt,
-                            i_pms,
-                            &self.key_share.share.n,
-                            self.key_share.share.key_bytes_size,
-                            // key: &RSAThresholdPublicKey,
-                            self.padding_scheme,
-                        )
-                    }) {
+                match data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
+                    verify_proof(
+                        msg.to_string(),
+                        self.public_pkg.v.clone(),
+                        delta,
+                        // FIXME the indexing has to match self.indices
+                        &self.public_pkg.verification_keys[i_pms.id - 1],
+                        i_pms,
+                        &self.key_share.share.n,
+                        self.key_share.share.key_bytes_size,
+                        self.padding_scheme,
+                    )
+                }) {
                     false => Err("verification proofs failed".into()),
 
                     true => {
@@ -292,19 +243,14 @@ impl SignContext {
                             msg.to_string(),
                             delta,
                             data,
-                            // key: &RSAThresholdPublicKey,
                             &self.key_share.share,
                             self.public_pkg.group_size,
                             self.padding_scheme,
                         );
 
                         self.round = SignRound::Done(signature.clone());
-                        // let msgs = serialize_bcast(&commitments, self.indices.as_ref().unwrap().len() - 1)?;
-                        let msgs = serialize_bcast(
-                            &signature,
-                            // vec![BigInt::zero()],
-                            self.indices.as_ref().unwrap().len() - 1,
-                        )?;
+                        let msgs =
+                            serialize_bcast(&signature, self.indices.as_ref().unwrap().len() - 1)?;
                         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
                     }
                 }
@@ -367,7 +313,6 @@ mod tests {
         // // Minus one because we do not count the R0 round
         // const ROUNDS: usize = mem::variant_count::<KeygenRound>() - 1;
         const ROUNDS: usize = 2;
-        // NOTE this index is suuper important!
         const INDEX_OFFSET: u32 = INDEX_OFFSET;
     }
 
@@ -376,7 +321,6 @@ mod tests {
         // Minus one because we do not count the R0 round
         // const ROUNDS: usize = mem::variant_count::<SignRound>() - 1;
         const ROUNDS: usize = 2;
-        // NOTE this index is suuper important!
         const INDEX_OFFSET: u32 = INDEX_OFFSET;
     }
 
@@ -397,7 +341,6 @@ mod tests {
                     Some((x, y)) => (x.clone(), y.clone()),
                 };
 
-                // assert parties share the public material
                 assert!(results
                     .clone()
                     .into_iter()
@@ -406,7 +349,6 @@ mod tests {
 
                 for i in 0..results.len() - 1 {
                     for j in i + 1..results.len() {
-                        // assert everyone has unique secret material
                         assert_ne!(results[i].0, results[j].0);
                     }
                 }
@@ -427,15 +369,9 @@ mod tests {
 
                 let results: Vec<(SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
-                // eprintln!("{:?}", results);
 
                 let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
                 indices.sort();
-                // let indices = vec![0, 2];
-
-                eprintln!("indices: {:?}", indices);
-
-                eprintln!("len ctxs: {}", last_rounds_ctxs.len());
 
                 let results = <SignContext as ThresholdProtocolTest>::run(
                     last_rounds_ctxs.clone(),
@@ -445,13 +381,11 @@ mod tests {
                 let signature: BigInt = serde_json::from_slice(&results[0]).unwrap();
                 let packages: Vec<(SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
-                eprintln!("0th context: {:?}", packages[0].1.public_key);
 
                 let hashed = Sha256::digest(msg);
 
                 assert_eq!(
                     packages[0].1.public_key.verify(
-                        // &mut ChaCha20Rng::from_entropy(),
                         Pkcs1v15Sign {
                             hash_len: None,
                             prefix: pkcs1v15_generate_prefix::<Sha256>().into(),
