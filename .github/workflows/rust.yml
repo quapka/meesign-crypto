@@ -8,6 +8,10 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: ["gg18", "frost", "elgamal", "default"]
 
     steps:
     - uses: actions/checkout@v3
@@ -21,7 +25,21 @@ jobs:
       uses: arduino/setup-protoc@v1
       with:
         version: 3.x
+    - name: Install pcsc-lite
+      run: sudo apt-get install libpcsclite-dev
     - name: Build
-      run: cargo build --verbose
+      run: >
+        cargo build
+        --no-default-features
+        --features ${{ matrix.feature }}
+        --release
+        --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: >
+        cargo test
+        --no-default-features
+        --features ${{ matrix.feature }}
+        --release
+        --verbose
+        --
+        --skip card
