@@ -32,7 +32,7 @@ enum KeygenRound {
 }
 
 impl KeygenContext {
-    fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn init(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let msg = ProtocolGroupInit::decode(data)?;
 
         if msg.protocol_type != ProtocolType::Ptsrsap1 as i32 {
@@ -89,10 +89,10 @@ impl KeygenContext {
         } else {
             self.round = KeygenRound::R1(Some(index), None, None);
         }
-        Ok(pack(msgs, ProtocolType::Ptsrsap1))
+        Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
 
-    fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn update(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let (c, msgs) = match &self.round {
             KeygenRound::R0 => return Err("protocol not initialized".into()),
 
@@ -128,13 +128,13 @@ impl KeygenContext {
         };
         self.round = c;
 
-        Ok(pack(msgs, ProtocolType::Ptsrsap1))
+        Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
 }
 
 #[typetag::serde(name = "ptsrsap1_keygen")]
 impl Protocol for KeygenContext {
-    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let data = match self.round {
             KeygenRound::R0 => self.init(data),
             _ => self.update(data),
@@ -191,7 +191,7 @@ impl SignContext {
             .ok_or("participant index not included".into())
     }
 
-    fn init(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn init(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let msg = ProtocolInit::decode(data)?;
         if msg.protocol_type != ProtocolType::Ptsrsap1 as i32 {
             return Err("wrong protocol type".into());
@@ -228,10 +228,10 @@ impl SignContext {
         let msgs = serialize_bcast(&pms, self.indices.as_ref().unwrap().len() - 1)?;
         // self.round = SignRound::R1(nonces, commitments);
         self.round = SignRound::R1(message, pms);
-        Ok(pack(msgs, ProtocolType::Ptsrsap1))
+        Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
 
-    fn update(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn update(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         match &self.round {
             SignRound::R0 => Err("protocol not initialized".into()),
             SignRound::R1(msg, pms) => {
@@ -305,7 +305,7 @@ impl SignContext {
                             // vec![BigInt::zero()],
                             self.indices.as_ref().unwrap().len() - 1,
                         )?;
-                        Ok(pack(msgs, ProtocolType::Ptsrsap1))
+                        Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
                     }
                 }
             }
@@ -316,7 +316,7 @@ impl SignContext {
 
 #[typetag::serde(name = "ptsrsap1_sign")]
 impl Protocol for SignContext {
-    fn advance(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+    fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let data = match self.round {
             SignRound::R0 => self.init(data),
             _ => self.update(data),
