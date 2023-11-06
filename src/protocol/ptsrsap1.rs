@@ -22,6 +22,8 @@ enum KeygenRound {
     Done(SecretPackage, PublicPackage),
 }
 
+// TODO add logging
+
 impl KeygenContext {
     fn init(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let msg = ProtocolGroupInit::decode(data)?;
@@ -41,7 +43,8 @@ impl KeygenContext {
         // TODO: Make it so that the dealer can be chosen by the user?
         if index == 0 {
             let mut share_data = vec![];
-            // TODO do the dealing
+            // TODO Use generate_with_dealer:
+            // TODO generate_with_dealer gives indices already, there might be a conflict
             // FIXME change the key_size to 2048
             let sk = key_gen(512, parties.into(), threshold.into()).unwrap();
             let shares = generate_secret_shares(&sk, parties.into(), threshold.into());
@@ -325,6 +328,9 @@ mod tests {
     }
 
     #[test]
+    // TODO The tests take a long time to finish as such it would be better to have them
+    // parametrized so that the results would be reported sooner than when the whole tests
+    // finishes.
     fn that_each_party_ends_up_with_the_same_public_and_unique_secret_material() {
         let max_parties = 10;
 
