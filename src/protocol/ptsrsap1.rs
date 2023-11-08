@@ -150,11 +150,10 @@ impl KeygenContext {
 #[typetag::serde(name = "ptsrsap1_keygen")]
 impl Protocol for KeygenContext {
     fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
-        let data = match self.round {
+        match self.round {
             KeygenRound::R0 => self.init(data),
             _ => self.update(data),
-        }?;
-        Ok(data)
+        }
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
@@ -250,7 +249,7 @@ impl SignContext {
                 let local_index = self.local_index()?;
                 let delta = factorial(self.public_pkg.group_size);
                 data.push(pms.clone());
-                match data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
+                let valid_proofs  = data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
                     verify_proof(
                         msg.to_string(),
                         self.public_pkg.v.clone(),
@@ -262,7 +261,8 @@ impl SignContext {
                         self.key_share.share.key_bytes_size,
                         self.padding_scheme,
                     )
-                }) {
+                });
+                match valid_proofs {
                     false => Err("verification proofs failed".into()),
 
                     true => {
@@ -290,11 +290,10 @@ impl SignContext {
 #[typetag::serde(name = "ptsrsap1_sign")]
 impl Protocol for SignContext {
     fn advance(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
-        let data = match self.round {
+        match self.round {
             SignRound::R0 => self.init(data),
             _ => self.update(data),
-        }?;
-        Ok(data)
+        }
     }
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
