@@ -5,6 +5,13 @@ use pretzel::*;
 use rsa::RsaPublicKey;
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+struct GroupParams {
+    min_signers: u16,
+    max_signers: u16,
+    signer_idx: u16,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct KeygenContext {
     round: KeygenRound,
@@ -17,9 +24,10 @@ enum KeygenRound {
     // NOTE:The Options here are required for the trusted dealer setup.
     //       The dealer saves the information while the rest waits for the next
     //       round to receive it.
-    R1(Option<u16>, Option<SecretPackage>, Option<PublicPackage>),
+    // TODO the GroupParams are not optional, all parties have them
+    R1(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>),
     // A this point everyone has access to the data.
-    Done(SecretPackage, PublicPackage),
+    Done(GroupParams, SecretPackage, PublicPackage),
 }
 
 // TODO add logging
@@ -35,9 +43,15 @@ impl KeygenContext {
         let (parties, threshold, index) =
             (msg.parties as u16, msg.threshold as u16, msg.index as u16);
 
+        let group_params = GroupParams {
+            max_signers: parties,
+            min_signers: threshold,
+            signer_idx: index,
+        };
+
         let mut msgs: Vec<Vec<u8>> = serialize_bcast(
             &(None::<u16>, None::<SecretPackage>, None::<PublicPackage>),
-            (parties - 1) as usize,
+            (group_params.max_signers - 1) as usize,
         )?;
         // The 0th party is implicitly the dealer
         // TODO: Make it so that the dealer can be chosen by the user?
@@ -70,9 +84,9 @@ impl KeygenContext {
             }
             msgs = serialize_uni(share_data)?;
             self.round = KeygenRound::R1(
-                Some(index),
+                Some(group_params),
                 Some(SecretPackage {
-                    uid: index as usize,
+                    uid: group_params.signer_idx as usize,
                     // The server cannot have the gid available at this point
                     gid: None,
                     share: shares[0].clone(),
@@ -80,7 +94,7 @@ impl KeygenContext {
                 Some(public_pkg),
             );
         } else {
-            self.round = KeygenRound::R1(Some(index), None, None);
+            self.round = KeygenRound::R1(Some(group_params), None, None);
         }
         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
@@ -89,25 +103,34 @@ impl KeygenContext {
         let (c, msgs) = match &self.round {
             KeygenRound::R0 => return Err("protocol not initialized".into()),
 
-            // This is the dealer case that already has its values generated.
-            KeygenRound::R1(Some(id), Some(secret_pkg), Some(public_pkg)) => {
-                let no_msgs: Vec<u8> = vec![0u8; 32];
+            // This is the dealer case that already has its values generated, so the values are
+            // only passed to the Done state.
+            KeygenRound::R1(Some(group_params), Some(secret_pkg), Some(public_pkg)) => {
+                // let data: Vec<(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>)> =
+                //     deserialize_vec(&unpack(data)?)?;
+                // let empty_msgs: Vec<u8> = vec![0u8; 13];
+                // let empty_msgs: Vec<Vec<u8>> = vec![vec![0u8; 1]; data.len()];
+                let empty_msgs: Vec<Vec<u8>> = serialize_uni(
+                    vec![vec![(None::<SecretPackage>, None::<PublicPackage>)]; (group_params.max_signers - 1) as usize])?;
                 (
-                    KeygenRound::Done(secret_pkg.clone(), public_pkg.clone()),
-                    serialize_uni(no_msgs)?,
+                    KeygenRound::Done(*group_params, secret_pkg.clone(), public_pkg.clone()),
+                    empty_msgs,
                 )
             }
 
             // Those are the other parties
-            KeygenRound::R1(Some(id), None, None) => {
+            KeygenRound::R1(Some(group_params), None, None) => {
                 let data: Vec<(Option<u16>, Option<SecretPackage>, Option<PublicPackage>)> =
                     deserialize_vec(&unpack(data)?)?;
                 let (Some(id_rcv), Some(spkg), Some(ppkg)) = &data[0] else {
                     todo!()
                 };
+                // let empty_msgs: Vec<Vec<u8>> = vec![vec![]; 1];
+                // let empty_msgs: Vec<Vec<u8>> = serialize_uni(vec![vec![(None, None)]; data.len()])?;
+                let empty_msgs: Vec<Vec<u8>> = serialize_uni(vec![vec![(None::<SecretPackage>, None::<PublicPackage>)]; (group_params.max_signers - 1) as usize])?;
                 (
-                    KeygenRound::Done(spkg.clone(), ppkg.clone()),
-                    serialize_uni(vec![0u8; 32])?,
+                    KeygenRound::Done(*group_params, spkg.clone(), ppkg.clone()),
+                    empty_msgs,
                 )
             }
 
@@ -116,7 +139,7 @@ impl KeygenContext {
                 panic!("Ended in an unexpected KeygenRound::R1, nor dealer or other party.");
             }
 
-            KeygenRound::Done(_, _) => return Err("protocol already finished".into()),
+            KeygenRound::Done(_, _, _) => return Err("protocol already finished".into()),
         };
         self.round = c;
 
@@ -136,8 +159,9 @@ impl Protocol for KeygenContext {
 
     fn finish(self: Box<Self>) -> Result<Vec<u8>> {
         match self.round {
-            KeygenRound::Done(secret_pkg, public_pkg) => {
-                Ok(serde_json::to_vec(&(secret_pkg, public_pkg))?)
+            KeygenRound::Done(group_params, secret_pkg, public_pkg) => {
+                // TODO ok also group_params?
+                Ok(serde_json::to_vec(&(group_params, secret_pkg, public_pkg))?)
             }
             _ => Err("protocol not finished".into()),
         }
@@ -283,7 +307,7 @@ impl Protocol for SignContext {
 
 impl ThresholdProtocol for SignContext {
     fn new(group: &[u8]) -> Self {
-        let (key_share, public_pkg): (SecretPackage, PublicPackage) =
+        let (group_params, key_share, public_pkg): (GroupParams, SecretPackage, PublicPackage) =
             serde_json::from_slice(group).expect("could not deserialize group context");
         Self {
             key_share: key_share,
@@ -339,23 +363,23 @@ mod tests {
                 let (_, last_rounds_ctxs) =
                     <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
 
-                let results: Vec<(SecretPackage, PublicPackage)> =
+                let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
 
-                let (_, dealer_public): (SecretPackage, PublicPackage) = match results.first() {
+                let (_, _, dealer_public): (GroupParams, SecretPackage, PublicPackage) = match results.first() {
                     None => panic!("the first value (the dealer) is always expected"),
-                    Some((x, y)) => (x.clone(), y.clone()),
+                    Some((g, x, y)) => (*g, x.clone(), y.clone()),
                 };
 
                 assert!(results
                     .clone()
                     .into_iter()
                     .skip(1)
-                    .all(|(_, party_public)| party_public == dealer_public));
+                    .all(|(_, _, party_public)| party_public == dealer_public));
 
                 for i in 0..results.len() - 1 {
                     for j in i + 1..results.len() {
-                        assert_ne!(results[i].0, results[j].0);
+                        assert_ne!(results[i].1, results[j].1);
                     }
                 }
             }
