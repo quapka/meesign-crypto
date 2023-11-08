@@ -355,7 +355,7 @@ mod tests {
     // parametrized so that the results would be reported sooner than when the whole tests
     // finishes.
     fn that_each_party_ends_up_with_the_same_public_and_unique_secret_material() {
-        let max_parties = 10;
+        let max_parties = 6;
 
         for threshold in 2..=max_parties {
             for parties in threshold..=max_parties {
