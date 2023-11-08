@@ -25,7 +25,11 @@ enum KeygenRound {
     //       The dealer saves the information while the rest waits for the next
     //       round to receive it.
     // TODO the GroupParams are not optional, all parties have them
-    R1(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>),
+    R1(
+        Option<GroupParams>,
+        Option<SecretPackage>,
+        Option<PublicPackage>,
+    ),
     // A this point everyone has access to the data.
     Done(GroupParams, SecretPackage, PublicPackage),
 }
@@ -110,8 +114,11 @@ impl KeygenContext {
                 //     deserialize_vec(&unpack(data)?)?;
                 // let empty_msgs: Vec<u8> = vec![0u8; 13];
                 // let empty_msgs: Vec<Vec<u8>> = vec![vec![0u8; 1]; data.len()];
-                let empty_msgs: Vec<Vec<u8>> = serialize_uni(
-                    vec![vec![(None::<SecretPackage>, None::<PublicPackage>)]; (group_params.max_signers - 1) as usize])?;
+                let empty_msgs: Vec<Vec<u8>> =
+                    serialize_uni(vec![
+                        vec![(None::<SecretPackage>, None::<PublicPackage>)];
+                        (group_params.max_signers - 1) as usize
+                    ])?;
                 (
                     KeygenRound::Done(*group_params, secret_pkg.clone(), public_pkg.clone()),
                     empty_msgs,
@@ -127,7 +134,11 @@ impl KeygenContext {
                 };
                 // let empty_msgs: Vec<Vec<u8>> = vec![vec![]; 1];
                 // let empty_msgs: Vec<Vec<u8>> = serialize_uni(vec![vec![(None, None)]; data.len()])?;
-                let empty_msgs: Vec<Vec<u8>> = serialize_uni(vec![vec![(None::<SecretPackage>, None::<PublicPackage>)]; (group_params.max_signers - 1) as usize])?;
+                let empty_msgs: Vec<Vec<u8>> =
+                    serialize_uni(vec![
+                        vec![(None::<SecretPackage>, None::<PublicPackage>)];
+                        (group_params.max_signers - 1) as usize
+                    ])?;
                 (
                     KeygenRound::Done(*group_params, spkg.clone(), ppkg.clone()),
                     empty_msgs,
@@ -249,7 +260,7 @@ impl SignContext {
                 let local_index = self.local_index()?;
                 let delta = factorial(self.public_pkg.group_size);
                 data.push(pms.clone());
-                let valid_proofs  = data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
+                let valid_proofs = data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
                     verify_proof(
                         msg.to_string(),
                         self.public_pkg.v.clone(),
@@ -365,10 +376,11 @@ mod tests {
                 let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
 
-                let (_, _, dealer_public): (GroupParams, SecretPackage, PublicPackage) = match results.first() {
-                    None => panic!("the first value (the dealer) is always expected"),
-                    Some((g, x, y)) => (*g, x.clone(), y.clone()),
-                };
+                let (_, _, dealer_public): (GroupParams, SecretPackage, PublicPackage) =
+                    match results.first() {
+                        None => panic!("the first value (the dealer) is always expected"),
+                        Some((g, x, y)) => (*g, x.clone(), y.clone()),
+                    };
 
                 assert!(results
                     .clone()
