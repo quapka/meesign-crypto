@@ -200,7 +200,7 @@ pub(crate) struct SignContext {
 #[derive(Serialize, Deserialize)]
 enum SignRound {
     R0,
-    // The first is the message, but we shoudln't story it here, maybe just the hash
+    // The first is the message, but we shoudln't store it here, maybe just the hash
     R1(String, PartialMessageSignature),
     // TODO this should be changed to Signature and not BigInt
     Done(BigInt),
@@ -230,7 +230,8 @@ impl SignContext {
         let delta = factorial(self.public_pkg.group_size);
         let message = match &self.message {
             None => return Err("cannot sign and empty message".into()),
-            Some(msg) => String::from_utf8(msg.to_vec()).unwrap(),
+            // FIXME we should be able to sign any bytes not just strings.
+            Some(value) => String::from_utf8(value.to_vec()).unwrap(),
         };
         let pms = sign_with_share(
             message.clone(),
