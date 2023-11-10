@@ -342,8 +342,10 @@ mod tests {
     use super::*;
     use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
     use itertools::Itertools;
+    use rand::distributions::Uniform;
     use rand::rngs::OsRng;
     use rand::seq::IteratorRandom;
+    use rand::Rng;
     use rsa::{hazmat::pkcs1v15_generate_prefix, Pkcs1v15Sign};
     use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
@@ -404,6 +406,14 @@ mod tests {
         }
     }
 
+    #[inline]
+    fn random_message() -> Vec<u8> {
+        let mut rng = rand::thread_rng();
+        let message_size = rng.gen_range(0..10_000);
+        let range = Uniform::from(0..=255);
+        rng.sample_iter(&range).take(message_size).collect()
+    }
+
     #[test]
     fn that_threshold_groups_create_valid_signatures() {
         let max_parties = 6;
@@ -417,18 +427,17 @@ mod tests {
                 let (_, last_rounds_ctxs) =
                     <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
 
-                let msg = b"hello";
-
                 let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
 
                 let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
                 indices.sort();
 
+                let msg = random_message();
                 let results = <SignContext as ThresholdProtocolTest>::run(
                     last_rounds_ctxs.clone(),
                     indices,
-                    msg.to_vec(),
+                    msg.clone(),
                 );
                 let signature: BigInt = serde_json::from_slice(&results[0]).unwrap();
                 let packages: Vec<(GroupParams, SecretPackage, PublicPackage)> =
