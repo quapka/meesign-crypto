@@ -419,7 +419,7 @@ mod tests {
 
                 let msg = b"hello";
 
-                let results: Vec<(SecretPackage, PublicPackage)> =
+                let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
 
                 let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
@@ -431,13 +431,13 @@ mod tests {
                     msg.to_vec(),
                 );
                 let signature: BigInt = serde_json::from_slice(&results[0]).unwrap();
-                let packages: Vec<(SecretPackage, PublicPackage)> =
+                let packages: Vec<(GroupParams, SecretPackage, PublicPackage)> =
                     deserialize_vec(&last_rounds_ctxs).unwrap();
 
                 let hashed = Sha256::digest(msg);
 
                 assert_eq!(
-                    packages[0].1.public_key.verify(
+                    packages[0].2.public_key.verify(
                         Pkcs1v15Sign {
                             hash_len: None,
                             prefix: pkcs1v15_generate_prefix::<Sha256>().into(),
