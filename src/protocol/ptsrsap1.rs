@@ -439,7 +439,7 @@ mod tests {
                 assert_eq!(
                     packages[0].2.public_key.verify(
                         Pkcs1v15Sign {
-                            hash_len: None,
+                            hash_len: Some(<Sha256>::output_size()),
                             prefix: pkcs1v15_generate_prefix::<Sha256>().into(),
                         },
                         &hashed,
