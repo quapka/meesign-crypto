@@ -201,7 +201,7 @@ pub(crate) struct SignContext {
 enum SignRound {
     R0,
     // The first is the message, but we shoudln't store it here, maybe just the hash
-    R1(String, PartialMessageSignature),
+    R1(PartialMessageSignature),
     // TODO this should be changed to Signature and not BigInt
     Done(BigInt),
 }
@@ -229,12 +229,13 @@ impl SignContext {
         // FIXME calculating factorials is possible DoS vector
         let delta = factorial(self.public_pkg.group_size);
         let message = match &self.message {
-            None => return Err("cannot sign and empty message".into()),
+            None => return Err("no message provided".into()),
             // FIXME we should be able to sign any bytes not just strings.
-            Some(value) => String::from_utf8(value.to_vec()).unwrap(),
+            Some(value) => value,
         };
+        // self.message = message;
         let pms = sign_with_share(
-            message.clone(),
+            message,
             delta,
             &self.key_share.share,
             self.public_pkg.v.clone(),
@@ -247,23 +248,28 @@ impl SignContext {
         // needs to generate the proof and broadcast all of these.
 
         let msgs = serialize_bcast(&pms, self.indices.as_ref().unwrap().len() - 1)?;
-        self.round = SignRound::R1(message, pms);
+        self.round = SignRound::R1(pms);
         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
     }
 
     fn update(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         match &self.round {
             SignRound::R0 => Err("protocol not initialized".into()),
-            SignRound::R1(msg, pms) => {
+            SignRound::R1(pms) => {
                 let mut data: Vec<PartialMessageSignature> = deserialize_vec(&unpack(data)?)?;
                 // Iterate over partialSignatures
-                assert_eq!(Some(msg.as_bytes().to_vec()), self.message);
+                // assert_eq!(Some(msg.as_bytes().to_vec()), self.message);
                 let local_index = self.local_index()?;
                 let delta = factorial(self.public_pkg.group_size);
                 data.push(pms.clone());
+                let message = match &self.message {
+                    None => return Err("no message provided".into()),
+                    // FIXME we should be able to sign any bytes not just strings.
+                    Some(value) => value,
+                };
                 let valid_proofs = data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
                     verify_proof(
-                        msg.to_string(),
+                        message,
                         self.public_pkg.v.clone(),
                         delta,
                         // FIXME the indexing has to match self.indices
@@ -279,7 +285,7 @@ impl SignContext {
 
                     true => {
                         let signature = combine_shares(
-                            msg.to_string(),
+                            message,
                             delta,
                             data,
                             &self.key_share.share,
