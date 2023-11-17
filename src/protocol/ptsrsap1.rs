@@ -54,7 +54,7 @@ impl KeygenContext {
         };
 
         let mut msgs: Vec<Vec<u8>> = serialize_bcast(
-            &(None::<u16>, None::<SecretPackage>, None::<PublicPackage>),
+            &(None::<GroupParams>, None::<SecretPackage>, None::<PublicPackage>),
             (group_params.max_signers - 1) as usize,
         )?;
         // The 0th party is implicitly the dealer
@@ -83,7 +83,7 @@ impl KeygenContext {
                         gid: None,
                         share: share.clone(),
                     };
-                    share_data.push((Some(index), secret_pkg, &public_pkg));
+                    share_data.push((Some(group_params), secret_pkg, &public_pkg));
                 }
             }
             msgs = serialize_uni(share_data)?;
@@ -110,38 +110,30 @@ impl KeygenContext {
             // This is the dealer case that already has its values generated, so the values are
             // only passed to the Done state.
             KeygenRound::R1(Some(group_params), Some(secret_pkg), Some(public_pkg)) => {
-                // let data: Vec<(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>)> =
-                //     deserialize_vec(&unpack(data)?)?;
-                // let empty_msgs: Vec<u8> = vec![0u8; 13];
-                // let empty_msgs: Vec<Vec<u8>> = vec![vec![0u8; 1]; data.len()];
-                let empty_msgs: Vec<Vec<u8>> =
-                    serialize_uni(vec![
-                        vec![(None::<SecretPackage>, None::<PublicPackage>)];
-                        (group_params.max_signers - 1) as usize
-                    ])?;
+                let msgs = inflate(
+                    serde_json::to_vec(&public_pkg.public_key)?,
+                    (group_params.max_signers - 1) as usize,
+                );
                 (
                     KeygenRound::Done(*group_params, secret_pkg.clone(), public_pkg.clone()),
-                    empty_msgs,
+                    msgs,
                 )
             }
 
             // Those are the other parties
             KeygenRound::R1(Some(group_params), None, None) => {
-                let data: Vec<(Option<u16>, Option<SecretPackage>, Option<PublicPackage>)> =
+                let data: Vec<(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>)> =
                     deserialize_vec(&unpack(data)?)?;
-                let (Some(id_rcv), Some(spkg), Some(ppkg)) = &data[0] else {
+                let (Some(group_params), Some(secret_pkg), Some(public_pkg)) = &data[0] else {
                     todo!()
                 };
-                // let empty_msgs: Vec<Vec<u8>> = vec![vec![]; 1];
-                // let empty_msgs: Vec<Vec<u8>> = serialize_uni(vec![vec![(None, None)]; data.len()])?;
-                let empty_msgs: Vec<Vec<u8>> =
-                    serialize_uni(vec![
-                        vec![(None::<SecretPackage>, None::<PublicPackage>)];
-                        (group_params.max_signers - 1) as usize
-                    ])?;
+                let msgs = inflate(
+                    serde_json::to_vec(&public_pkg.public_key)?,
+                    (group_params.max_signers - 1) as usize,
+                );
                 (
-                    KeygenRound::Done(*group_params, spkg.clone(), ppkg.clone()),
-                    empty_msgs,
+                    KeygenRound::Done(*group_params, secret_pkg.clone(), public_pkg.clone()),
+                    msgs,
                 )
             }
 
@@ -390,6 +382,7 @@ mod tests {
                         None => panic!("the first value (the dealer) is always expected"),
                         Some((g, x, y)) => (*g, x.clone(), y.clone()),
                     };
+
 
                 assert!(results
                     .clone()
