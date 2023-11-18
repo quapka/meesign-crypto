@@ -54,7 +54,11 @@ impl KeygenContext {
         };
 
         let mut msgs: Vec<Vec<u8>> = serialize_bcast(
-            &(None::<GroupParams>, None::<SecretPackage>, None::<PublicPackage>),
+            &(
+                None::<GroupParams>,
+                None::<SecretPackage>,
+                None::<PublicPackage>,
+            ),
             (group_params.max_signers - 1) as usize,
         )?;
         // The 0th party is implicitly the dealer
@@ -122,8 +126,11 @@ impl KeygenContext {
 
             // Those are the other parties
             KeygenRound::R1(Some(group_params), None, None) => {
-                let data: Vec<(Option<GroupParams>, Option<SecretPackage>, Option<PublicPackage>)> =
-                    deserialize_vec(&unpack(data)?)?;
+                let data: Vec<(
+                    Option<GroupParams>,
+                    Option<SecretPackage>,
+                    Option<PublicPackage>,
+                )> = deserialize_vec(&unpack(data)?)?;
                 let (Some(group_params), Some(secret_pkg), Some(public_pkg)) = &data[0] else {
                     todo!()
                 };
@@ -383,7 +390,6 @@ mod tests {
                         Some((g, x, y)) => (*g, x.clone(), y.clone()),
                     };
 
-
                 assert!(results
                     .clone()
                     .into_iter()
@@ -438,6 +444,7 @@ mod tests {
 
                 let hashed = Sha256::digest(msg);
 
+                // FIXME: The verification sometimes fails
                 assert_eq!(
                     packages[0].2.public_key.verify(
                         Pkcs1v15Sign {
