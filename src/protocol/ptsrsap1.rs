@@ -68,7 +68,7 @@ impl KeygenContext {
             // TODO Use generate_with_dealer:
             // TODO generate_with_dealer gives indices already, there might be a conflict
             // FIXME change the key_size to 2048
-            let sk = key_gen(2048, parties.into(), threshold.into()).unwrap();
+            let sk = key_gen(512, parties.into(), threshold.into()).unwrap();
             let shares = generate_secret_shares(&sk, parties.into(), threshold.into());
             let (v, vks) = generate_verification(&RSAThresholdPublicKey::from(&sk), shares.clone());
 
@@ -295,10 +295,10 @@ impl SignContext {
                         self.round = SignRound::Done(signature.clone());
                         // FIXME signature needs to be tested more, because once the BigInts are
                         // not used in pretzel taking .1 will likely fail
-                        let msgs = serialize_bcast(
-                            &signature.to_bytes_be().1,
+                        let msgs = inflate(
+                            signature.to_bytes_be().1,
                             self.indices.as_ref().unwrap().len() - 1,
-                        )?;
+                        );
                         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
                     }
                 }
