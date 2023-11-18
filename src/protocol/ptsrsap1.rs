@@ -2,7 +2,7 @@ use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
 use num_bigint::*;
 use pretzel::*;
-use rsa::RsaPublicKey;
+use rsa::{pkcs1::EncodeRsaPublicKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -115,7 +115,7 @@ impl KeygenContext {
             // only passed to the Done state.
             KeygenRound::R1(Some(group_params), Some(secret_pkg), Some(public_pkg)) => {
                 let msgs = inflate(
-                    serde_json::to_vec(&public_pkg.public_key)?,
+                    public_pkg.public_key.to_pkcs1_der().unwrap().to_vec(),
                     (group_params.max_signers - 1) as usize,
                 );
                 (
@@ -135,7 +135,7 @@ impl KeygenContext {
                     todo!()
                 };
                 let msgs = inflate(
-                    serde_json::to_vec(&public_pkg.public_key)?,
+                    public_pkg.public_key.to_pkcs1_der().unwrap().to_vec(),
                     (group_params.max_signers - 1) as usize,
                 );
                 (
