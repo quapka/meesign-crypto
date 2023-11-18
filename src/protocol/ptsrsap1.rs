@@ -68,7 +68,7 @@ impl KeygenContext {
             // TODO Use generate_with_dealer:
             // TODO generate_with_dealer gives indices already, there might be a conflict
             // FIXME change the key_size to 2048
-            let sk = key_gen(512, parties.into(), threshold.into()).unwrap();
+            let sk = key_gen(2048, parties.into(), threshold.into()).unwrap();
             let shares = generate_secret_shares(&sk, parties.into(), threshold.into());
             let (v, vks) = generate_verification(&RSAThresholdPublicKey::from(&sk), shares.clone());
 
