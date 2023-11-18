@@ -293,8 +293,12 @@ impl SignContext {
                         );
 
                         self.round = SignRound::Done(signature.clone());
-                        let msgs =
-                            serialize_bcast(&signature, self.indices.as_ref().unwrap().len() - 1)?;
+                        // FIXME signature needs to be tested more, because once the BigInts are
+                        // not used in pretzel taking .1 will likely fail
+                        let msgs = serialize_bcast(
+                            &signature.to_bytes_be().1,
+                            self.indices.as_ref().unwrap().len() - 1,
+                        )?;
                         Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
                     }
                 }
