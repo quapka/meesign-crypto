@@ -25,6 +25,7 @@ pretzel = { git = "https://github.com/quapka/pretzel.git", branch = "dev", optio
 rsa = { git = "https://github.com/quapka/RSA.git", branch = "more-hazmat", features = ["hazmat", "serde"], optional = true}
 num-bigint = { version = "0.8.2", features = [],  package = "num-bigint-dig" }
 k256 = { version = "0.13.1", features = ["arithmetic"] }
+rayon = "*"
 
 [build-dependencies]
 cbindgen = "0.20.0"

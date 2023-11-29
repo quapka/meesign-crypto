@@ -19,6 +19,7 @@ pub enum Recipient {
     Card,
     Server,
 }
+use rayon::prelude::*;
 
 #[typetag::serde]
 pub trait Protocol {
@@ -38,8 +39,10 @@ pub trait ThresholdProtocol: Protocol {
         Self: Sized;
 }
 
-fn deserialize_vec<'de, T: Deserialize<'de>>(vec: &'de [Vec<u8>]) -> serde_json::Result<Vec<T>> {
-    vec.iter()
+pub fn deserialize_vec<'de, T: Deserialize<'de> + std::marker::Send>(
+    vec: &'de [Vec<u8>],
+) -> serde_json::Result<Vec<T>> {
+    vec.par_iter()
         .map(|item| serde_json::from_slice::<T>(item))
         .collect()
 }
@@ -80,6 +83,7 @@ mod tests {
     use super::*;
 
     use prost::bytes::Bytes;
+    use rayon::prelude::*;
 
     use crate::{
         proto::{ProtocolGroupInit, ProtocolInit},
@@ -92,13 +96,16 @@ mod tests {
         const ROUNDS: usize;
         const INDEX_OFFSET: u32 = 0;
 
-        fn run(threshold: u32, parties: u32) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        fn run(threshold: u32, parties: u32) -> (Vec<Vec<u8>>, Vec<Vec<u8>>)
+        where
+            Self: Sized + Send,
+        {
             assert!(threshold <= parties);
 
             // initialize
             let mut ctxs: Vec<Self> = (0..parties).map(|_| Self::new()).collect();
             let mut messages: Vec<_> = ctxs
-                .iter_mut()
+                .par_iter_mut()
                 .enumerate()
                 .map(|(idx, ctx)| {
                     ProtocolMessage::decode::<Bytes>(
@@ -123,11 +130,11 @@ mod tests {
             // protocol rounds
             for _ in 0..(Self::ROUNDS - 1) {
                 messages = ctxs
-                    .iter_mut()
+                    .par_iter_mut()
                     .enumerate()
                     .map(|(idx, ctx)| {
                         let relay = messages
-                            .iter()
+                            .par_iter()
                             .enumerate()
                             .map(|(sender, msg)| {
                                 if sender < idx {
@@ -160,7 +167,7 @@ mod tests {
                     .collect();
             }
 
-            let pks: Vec<_> = messages.iter().map(|x| x[0].clone()).collect();
+            let pks: Vec<_> = messages.par_iter().map(|x| x[0].clone()).collect();
 
             let results = ctxs
                 .into_iter()
@@ -177,24 +184,27 @@ mod tests {
         const ROUNDS: usize;
         const INDEX_OFFSET: u32 = 0;
 
-        fn run(ctxs: Vec<Vec<u8>>, indices: Vec<u16>, data: Vec<u8>) -> Vec<Vec<u8>> {
+        fn run(ctxs: Vec<Vec<u8>>, indices: Vec<u16>, data: Vec<u8>) -> Vec<Vec<u8>>
+        where
+            Self: Send,
+        {
             // initialize
             let mut ctxs: Vec<Self> = ctxs
-                .iter()
+                .par_iter()
                 .enumerate()
                 .filter(|(idx, _)| indices.contains(&(*idx as u16)))
                 .map(|(_, ctx)| Self::new(&ctx))
                 .collect();
             let mut messages: Vec<_> = indices
-                .iter()
-                .zip(ctxs.iter_mut())
+                .par_iter()
+                .zip(ctxs.par_iter_mut())
                 .map(|(idx, ctx)| {
                     ProtocolMessage::decode::<Bytes>(
                         ctx.advance(
                             &(ProtocolInit {
                                 protocol_type: Self::PROTOCOL_TYPE as i32,
                                 indices: indices
-                                    .iter()
+                                    .par_iter()
                                     .map(|x| *x as u32 + Self::INDEX_OFFSET)
                                     .collect(),
                                 index: *idx as u32 + Self::INDEX_OFFSET,
@@ -214,11 +224,11 @@ mod tests {
             // protocol rounds
             for _ in 0..(Self::ROUNDS - 1) {
                 messages = ctxs
-                    .iter_mut()
+                    .par_iter_mut()
                     .enumerate()
                     .map(|(idx, ctx)| {
                         let relay = messages
-                            .iter()
+                            .par_iter()
                             .enumerate()
                             .map(|(sender, msg)| {
                                 if sender < idx {
