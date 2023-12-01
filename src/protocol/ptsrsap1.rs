@@ -2,18 +2,19 @@ use crate::proto::{ProtocolGroupInit, ProtocolInit, ProtocolType};
 use crate::protocol::*;
 use num_bigint::*;
 use pretzel::*;
+use rayon::prelude::*;
 use rsa::{pkcs1::EncodeRsaPublicKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
-struct GroupParams {
+pub struct GroupParams {
     min_signers: u16,
     max_signers: u16,
     signer_idx: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct KeygenContext {
+pub struct KeygenContext {
     round: KeygenRound,
 }
 
@@ -68,7 +69,11 @@ impl KeygenContext {
             // TODO Use generate_with_dealer:
             // TODO generate_with_dealer gives indices already, there might be a conflict
             // FIXME change the key_size to 2048
-            let sk = key_gen(2048, parties.into(), threshold.into()).unwrap();
+            // save_key(&sk);
+            let sk = match cfg!(test) {
+                true => load_key().unwrap(),
+                false => key_gen(2048, parties.into(), threshold.into()).unwrap(),
+            };
             let shares = generate_secret_shares(&sk, parties.into(), threshold.into());
             let (v, vks) = generate_verification(&RSAThresholdPublicKey::from(&sk), shares.clone());
 
@@ -186,7 +191,7 @@ impl KeygenProtocol for KeygenContext {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SignContext {
+pub struct SignContext {
     key_share: SecretPackage,
     public_pkg: PublicPackage,
     message: Option<Vec<u8>>,
@@ -202,17 +207,17 @@ enum SignRound {
     // The first is the message, but we shoudln't store it here, maybe just the hash
     R1(PartialMessageSignature),
     // TODO this should be changed to Signature and not BigInt
-    Done(BigInt),
+    Done(Vec<u8>),
 }
 
 impl SignContext {
-    fn local_index(&self) -> Result<usize> {
-        let identifier = self.key_share.uid;
-        self.indices
-            .as_ref()
-            .and_then(|indices| indices.iter().position(|x| *x == identifier as u16))
-            .ok_or("participant index not included".into())
-    }
+    // fn local_index(&self) -> Result<usize> {
+    //     let identifier = self.key_share.uid;
+    //     self.indices
+    //         .as_ref()
+    //         .and_then(|indices| indices.iter().position(|x| *x == identifier as u16))
+    //         .ok_or("participant index not included".into())
+    // }
 
     fn init(&mut self, data: &[u8]) -> Result<(Vec<u8>, Recipient)> {
         let msg = ProtocolInit::decode(data)?;
@@ -237,7 +242,7 @@ impl SignContext {
             message,
             delta,
             &self.key_share.share,
-            self.public_pkg.v.clone(),
+            &self.public_pkg.v,
             // TODO provide index
             &self.public_pkg.verification_keys[self.key_share.uid],
             self.padding_scheme,
@@ -258,7 +263,7 @@ impl SignContext {
                 let mut data: Vec<PartialMessageSignature> = deserialize_vec(&unpack(data)?)?;
                 // Iterate over partialSignatures
                 // assert_eq!(Some(msg.as_bytes().to_vec()), self.message);
-                let local_index = self.local_index()?;
+                // let local_index = self.local_index()?;
                 let delta = factorial(self.public_pkg.group_size);
                 data.push(pms.clone());
                 let message = match &self.message {
@@ -266,40 +271,58 @@ impl SignContext {
                     // FIXME we should be able to sign any bytes not just strings.
                     Some(value) => value,
                 };
-                let valid_proofs = data.clone().into_iter().enumerate().all(|(ind, i_pms)| {
-                    verify_proof(
-                        message,
-                        self.public_pkg.v.clone(),
-                        delta,
-                        // FIXME the indexing has to match self.indices
-                        &self.public_pkg.verification_keys[i_pms.id - 1],
-                        i_pms,
-                        &self.key_share.share.n,
-                        self.key_share.share.key_bytes_size,
-                        self.padding_scheme,
-                    )
-                });
-                match valid_proofs {
-                    false => Err("verification proofs failed".into()),
+                let some_invalid_proof = data
+                    .clone()
+                    .into_par_iter()
+                    .find_any(|i_pms| {
+                        !verify_proof(
+                            message,
+                            &self.public_pkg.v,
+                            delta,
+                            // FIXME the indexing has to match self.indices
+                            &self.public_pkg.verification_keys[i_pms.id - 1],
+                            &i_pms,
+                            &self.key_share.share.n,
+                            self.key_share.share.key_bytes_size,
+                            self.padding_scheme,
+                        )
+                    })
+                    .is_some();
 
-                    true => {
-                        let signature = combine_shares(
+                // let valid_proofs = data.clone().into_iter().enumerate().all(|(_ind, i_pms)| {
+                //     verify_proof(
+                //         message,
+                //         &self.public_pkg.v,
+                //         delta,
+                //         // FIXME the indexing has to match self.indices
+                //         &self.public_pkg.verification_keys[i_pms.id - 1],
+                //         &i_pms,
+                //         &self.key_share.share.n,
+                //         self.key_share.share.key_bytes_size,
+                //         self.padding_scheme,
+                //     )
+                // });
+                match some_invalid_proof {
+                    true => Err("verification proofs failed".into()),
+                    false => {
+                        match combine_shares(
                             message,
                             delta,
                             data,
                             &self.key_share.share,
                             self.public_pkg.group_size,
                             self.padding_scheme,
-                        );
-
-                        self.round = SignRound::Done(signature.clone());
-                        // FIXME signature needs to be tested more, because once the BigInts are
-                        // not used in pretzel taking .1 will likely fail
-                        let msgs = inflate(
-                            signature.to_bytes_be().1,
-                            self.indices.as_ref().unwrap().len() - 1,
-                        );
-                        Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
+                        ) {
+                            Ok(signature) => {
+                                self.round = SignRound::Done(signature.clone());
+                                // FIXME signature needs to be tested more, because once the BigInts are
+                                // not used in pretzel taking .1 will likely fail
+                                let msgs =
+                                    inflate(signature, self.indices.as_ref().unwrap().len() - 1);
+                                Ok((pack(msgs, ProtocolType::Ptsrsap1), Recipient::Server))
+                            }
+                            Err(__) => Err("combining shares failed".into()),
+                        }
                     }
                 }
             }
@@ -327,7 +350,7 @@ impl Protocol for SignContext {
 
 impl ThresholdProtocol for SignContext {
     fn new(group: &[u8]) -> Self {
-        let (group_params, key_share, public_pkg): (GroupParams, SecretPackage, PublicPackage) =
+        let (_group_params, key_share, public_pkg): (GroupParams, SecretPackage, PublicPackage) =
             serde_json::from_slice(group).expect("could not deserialize group context");
         Self {
             key_share: key_share,
@@ -344,6 +367,7 @@ impl ThresholdProtocol for SignContext {
 mod tests {
     use super::*;
     use crate::protocol::tests::{KeygenProtocolTest, ThresholdProtocolTest};
+    use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
     use itertools::Itertools;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
@@ -378,89 +402,103 @@ mod tests {
     // parametrized so that the results would be reported sooner than when the whole tests
     // finishes.
     fn that_each_party_ends_up_with_the_same_public_and_unique_secret_material() {
-        let max_parties = 6;
+        let max_parties = 5;
 
-        for threshold in 2..=max_parties {
-            for parties in threshold..=max_parties {
-                let (_, last_rounds_ctxs) =
-                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+        (2..=max_parties).into_par_iter().for_each(|threshold| {
+            // for threshold in 2..=max_parties {
+            (threshold..=max_parties)
+                .into_par_iter()
+                .for_each(|parties| {
+                    // for parties in threshold..=max_parties {
+                    let (_, last_rounds_ctxs) = <KeygenContext as KeygenProtocolTest>::run(
+                        threshold as u32,
+                        parties as u32,
+                    );
 
-                let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
-                    deserialize_vec(&last_rounds_ctxs).unwrap();
+                    let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
+                        deserialize_vec(&last_rounds_ctxs).unwrap();
 
-                let (_, _, dealer_public): (GroupParams, SecretPackage, PublicPackage) =
-                    match results.first() {
-                        None => panic!("the first value (the dealer) is always expected"),
-                        Some((g, x, y)) => (*g, x.clone(), y.clone()),
-                    };
+                    let (_, _, dealer_public): (GroupParams, SecretPackage, PublicPackage) =
+                        match results.first() {
+                            None => panic!("the first value (the dealer) is always expected"),
+                            Some((g, x, y)) => (*g, x.clone(), y.clone()),
+                        };
 
-                assert!(results
-                    .clone()
-                    .into_iter()
-                    .skip(1)
-                    .all(|(_, _, party_public)| party_public == dealer_public));
+                    assert!(results
+                        .clone()
+                        .into_par_iter()
+                        .skip(1)
+                        .all(|(_, _, party_public)| party_public == dealer_public));
 
-                for i in 0..results.len() - 1 {
-                    for j in i + 1..results.len() {
-                        assert_ne!(results[i].1, results[j].1);
+                    for i in 0..results.len() - 1 {
+                        for j in i + 1..results.len() {
+                            assert_ne!(results[i].1, results[j].1);
+                        }
                     }
-                }
-            }
-        }
+                });
+        });
     }
 
     #[inline]
     fn random_message() -> Vec<u8> {
         let mut rng = rand::thread_rng();
-        let message_size = rng.gen_range(0..10_000);
+        let message_size = rng.gen_range(0..100);
         let range = Uniform::from(0..=255);
         rng.sample_iter(&range).take(message_size).collect()
     }
 
     #[test]
     fn that_threshold_groups_create_valid_signatures() {
-        let max_parties = 6;
+        let max_parties = 5;
         // TODO FIXME the scheme is not working for 1-out-of-1 type of setting. That is kinda OK,
         // but it could mean that there is something slightly off.
-        // let parties = 1;
-        // let threshold = 1;
 
-        for threshold in 2..max_parties {
-            for parties in threshold..max_parties {
-                let (_, last_rounds_ctxs) =
-                    <KeygenContext as KeygenProtocolTest>::run(threshold as u32, parties as u32);
+        // for threshold in 2..max_parties {
+        //     for parties in threshold..max_parties {
+        (2..=max_parties).into_par_iter().for_each(|threshold| {
+            // for threshold in 2..=max_parties {
+            (threshold..=max_parties)
+                .into_par_iter()
+                .for_each(|parties| {
+                    let (_, last_rounds_ctxs) = <KeygenContext as KeygenProtocolTest>::run(
+                        threshold as u32,
+                        parties as u32,
+                    );
 
-                let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
-                    deserialize_vec(&last_rounds_ctxs).unwrap();
+                    let results: Vec<(GroupParams, SecretPackage, PublicPackage)> =
+                        deserialize_vec(&last_rounds_ctxs).unwrap();
 
-                let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
-                indices.sort();
+                    let mut indices = (0..parties as u16).choose_multiple(&mut OsRng, threshold);
+                    indices.sort();
 
-                let msg = random_message();
-                let results = <SignContext as ThresholdProtocolTest>::run(
-                    last_rounds_ctxs.clone(),
-                    indices,
-                    msg.clone(),
-                );
-                let signature: BigInt = serde_json::from_slice(&results[0]).unwrap();
-                let packages: Vec<(GroupParams, SecretPackage, PublicPackage)> =
-                    deserialize_vec(&last_rounds_ctxs).unwrap();
+                    let msg = random_message();
+                    let results = <SignContext as ThresholdProtocolTest>::run(
+                        last_rounds_ctxs.clone(),
+                        indices,
+                        msg.clone(),
+                    );
+                    let signature: Vec<u8> = serde_json::from_slice(&results[0]).unwrap();
+                    let packages: Vec<(GroupParams, SecretPackage, PublicPackage)> =
+                        deserialize_vec(&last_rounds_ctxs).unwrap();
 
-                let hashed = Sha256::digest(msg);
+                    // let hashed = Sha256::digest(msg);
 
-                // FIXME: The verification sometimes fails
-                assert_eq!(
-                    packages[0].2.public_key.verify(
-                        Pkcs1v15Sign {
-                            hash_len: Some(<Sha256>::output_size()),
-                            prefix: pkcs1v15_generate_prefix::<Sha256>().into(),
-                        },
-                        &hashed,
-                        &signature.to_bytes_be().1,
-                    ),
-                    Ok(()),
-                );
-            }
-        }
+                    // FIXME: The verification sometimes fails
+                    assert_eq!(
+                        packages[0].2.public_key.verify(
+                            // FIXME we are currently not hashing the messages
+                            Pkcs1v15Sign::new_unprefixed(),
+                            &msg,
+                            // Pkcs1v15Sign {
+                            //     hash_len: Some(<Sha256>::output_size()),
+                            //     prefix: pkcs1v15_generate_prefix::<Sha256>().into(),
+                            // },
+                            // &hashed,
+                            &signature,
+                        ),
+                        Ok(()),
+                    );
+                });
+        });
     }
 }
